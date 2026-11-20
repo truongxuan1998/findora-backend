@@ -1,27 +1,12 @@
-mod audit;
-mod auth;
-mod config;
-mod db;
-mod errors;
-mod i18n;
-mod image_validator;
-mod models;
-mod routes;
-mod storage;
-
-use config::Config;
 use dotenvy::dotenv;
+use findora_backend::config::Config;
+use findora_backend::{db, routes, AppState};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
-pub struct AppState {
-    pub pool: Arc<sqlx::PgPool>,
-    pub config: Config,
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

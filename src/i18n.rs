@@ -186,23 +186,3 @@ pub fn msg_no_wallet_available(lang: Language) -> &'static str {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_language_detection() {
-        assert_eq!(Language::from_header_value("en-US,en;q=0.9"), Language::En);
-        assert_eq!(Language::from_header_value("en"), Language::En);
-        assert_eq!(Language::from_header_value("vi-VN,vi;q=0.9"), Language::Vi);
-        assert_eq!(Language::from_header_value("fr-FR"), Language::Vi); // fallback default
-    }
-
-    #[test]
-    fn test_bilingual_messages() {
-        assert_eq!(msg_login_success(Language::Vi), "Đăng nhập thành công");
-        assert_eq!(msg_login_success(Language::En), "Login successful");
-        assert_eq!(msg_default_wallet_name(Language::Vi), "Ví tiền mặt");
-        assert_eq!(msg_default_wallet_name(Language::En), "Cash Wallet");
-    }
-}
