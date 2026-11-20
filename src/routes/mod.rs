@@ -33,5 +33,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/transactions", get(transactions::list_transactions_handler).post(transactions::create_transaction_handler))
         // Reports
         .route("/api/reports/monthly", get(reports::monthly_report_handler))
+        // Audit Middleware: Ghi nhận IP, Location, Device Name, OS Version cho mọi request
+        .layer(axum::middleware::from_fn(crate::audit::audit_log_middleware))
         .with_state(state)
 }
