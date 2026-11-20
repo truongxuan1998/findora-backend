@@ -38,7 +38,7 @@ pub async fn monthly_report_handler(
 
     // 1. Tính tổng Thu và Chi chuẩn xác theo khoảng thời gian và user/wallet
     let totals_rows = sqlx::query(
-        "SELECT t.tx_type, COALESCE(SUM(t.amount), 0) as sum
+        "SELECT t.tx_type, COALESCE(SUM(t.amount), 0)::BIGINT as sum
          FROM findora.transactions t
          INNER JOIN findora.wallets w ON t.wallet_id = w.id
          WHERE t.deleted_at IS NULL
@@ -71,7 +71,7 @@ pub async fn monthly_report_handler(
 
     // 2. Breakdown theo danh mục (Chi tiêu)
     let expense_rows = sqlx::query(
-        "SELECT c.id as cat_id, c.name as cat_name, COALESCE(SUM(t.amount), 0) as total_cat
+        "SELECT c.id as cat_id, c.name as cat_name, COALESCE(SUM(t.amount), 0)::BIGINT as total_cat
          FROM findora.transactions t
          INNER JOIN findora.wallets w ON t.wallet_id = w.id
          INNER JOIN findora.categories c ON t.category_id = c.id
@@ -112,7 +112,7 @@ pub async fn monthly_report_handler(
 
     // 3. Breakdown theo danh mục (Thu nhập)
     let income_rows = sqlx::query(
-        "SELECT c.id as cat_id, c.name as cat_name, COALESCE(SUM(t.amount), 0) as total_cat
+        "SELECT c.id as cat_id, c.name as cat_name, COALESCE(SUM(t.amount), 0)::BIGINT as total_cat
          FROM findora.transactions t
          INNER JOIN findora.wallets w ON t.wallet_id = w.id
          INNER JOIN findora.categories c ON t.category_id = c.id
