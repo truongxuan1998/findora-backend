@@ -45,6 +45,7 @@ pub struct ForgotPasswordRequest {
 pub struct ForgotPasswordResponse {
     pub success: bool,
     pub message: String,
+    pub expires_in: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reset_code: Option<String>,
 }

@@ -335,6 +335,7 @@ pub async fn forgot_password_handler(
     Json(payload): Json<ForgotPasswordRequest>,
 ) -> AppResult<Json<ForgotPasswordResponse>> {
     let email = payload.email.trim().to_lowercase();
+    const OTP_EXPIRY_SECONDS: u32 = 120;
     if email.is_empty() {
         return Err(AppError::BadRequest("Email không được để trống".into()));
     }
@@ -352,6 +353,7 @@ pub async fn forgot_password_handler(
         return Ok(Json(ForgotPasswordResponse {
             success: true,
             message: i18n::msg_forgot_password_sent(lang).to_string(),
+            expires_in: OTP_EXPIRY_SECONDS,
             reset_code: None,
         }));
     }
@@ -382,7 +384,7 @@ pub async fn forgot_password_handler(
     let reset_id = format!("rst_{}", Uuid::new_v4().simple());
     let vn_offset = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
     // Hạn hiệu lực của mã OTP: 120 giây (2 phút)
-    let expires_at = (chrono::Utc::now() + chrono::Duration::seconds(120)).with_timezone(&vn_offset);
+    let expires_at = (chrono::Utc::now() + chrono::Duration::seconds(OTP_EXPIRY_SECONDS as i64)).with_timezone(&vn_offset);
 
     sqlx::query(
         "INSERT INTO findora.password_resets (id, email, code, expires_at, created_at)
@@ -412,10 +414,11 @@ pub async fn forgot_password_handler(
         }
     });
 
-    // Chuẩn Production: Tuyệt đối không bao giờ trả reset_code qua API response
+    // Chuẩn Production: Trả về expires_in (120s) để client app hiển thị đồng hồ đếm ngược
     Ok(Json(ForgotPasswordResponse {
         success: true,
         message: i18n::msg_forgot_password_sent(lang).to_string(),
+        expires_in: OTP_EXPIRY_SECONDS,
         reset_code: None,
     }))
 }

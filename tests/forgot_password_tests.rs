@@ -64,7 +64,8 @@ async fn test_forgot_and_reset_password_workflow() {
         .await
         .expect("Yêu cầu quên mật khẩu phải thành công");
 
-    // Chuẩn Production: API response tuyệt đối KHÔNG chứa reset_code
+    // Chuẩn Production: API response tuyệt đối KHÔNG chứa reset_code nhưng trả expires_in 120s để client đếm ngược
+    assert_eq!(forgot_res.0.expires_in, 120, "Hạn mã xác thực phải là 120 giây");
     assert!(
         forgot_res.0.reset_code.is_none(),
         "Production API response không được tiết lộ mã xác thực"
@@ -141,10 +142,12 @@ async fn test_forgot_and_reset_password_workflow() {
 
     // 8. Kiểm tra cơ chế timeout 120 giây: Mã hết hạn (> 120s) phải bị từ chối
     let expired_code = "888888";
+    let expired_id = format!("rst_exp_{}", uuid::Uuid::new_v4().simple());
     let _ = sqlx::query(
         "INSERT INTO findora.password_resets (id, email, code, expires_at, created_at)
-         VALUES ('rst_expired_test', $1, $2, NOW() - INTERVAL '1 second', NOW() - INTERVAL '121 seconds')"
+         VALUES ($1, $2, $3, NOW() - INTERVAL '1 second', NOW() - INTERVAL '121 seconds')"
     )
+    .bind(&expired_id)
     .bind(test_email)
     .bind(expired_code)
     .execute(&pool)
