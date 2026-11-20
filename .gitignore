@@ -1,6 +1,27 @@
-/target
+# Environment files & Secrets (Tuyệt đối không push file chứa credentials)
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.crt
+*.pfx
+*.p12
+*.jks
+*.keystore
+secrets.json
+credentials.json
+service_account.json
+
+# Rust & Cargo build outputs
+/target
+
+# Operating System & IDE Files
 .DS_Store
-.idea
+.idea/
+.vscode/
 *.swp
+*.swo
+*~
 *.log
