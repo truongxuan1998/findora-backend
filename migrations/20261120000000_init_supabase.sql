@@ -16,7 +16,20 @@ BEGIN
     END IF;
 END $$;
 
--- 1. Bảng Categories (Phân loại Chi tiêu & Nguồn thu nhập)
+-- 1. Bảng Users (Tài khoản người dùng Findora)
+CREATE TABLE IF NOT EXISTS findora.users (
+    id TEXT PRIMARY KEY,
+    email TEXT UNIQUE NOT NULL,
+    full_name TEXT NOT NULL,
+    phone_number TEXT DEFAULT '',
+    password_hash TEXT NOT NULL,
+    avatar_url TEXT DEFAULT '',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_users_email ON findora.users(email);
+
+-- 2. Bảng Categories (Phân loại Chi tiêu & Nguồn thu nhập)
 CREATE TABLE IF NOT EXISTS findora.categories (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -26,10 +39,10 @@ CREATE TABLE IF NOT EXISTS findora.categories (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 2. Bảng Wallets (Ví tài chính)
+-- 3. Bảng Wallets (Ví tài chính - Tham chiếu findora.users)
 CREATE TABLE IF NOT EXISTS findora.wallets (
     id TEXT PRIMARY KEY,
-    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES findora.users(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     currency VARCHAR(10) NOT NULL DEFAULT 'VND',
     initial_balance BIGINT NOT NULL DEFAULT 0,
@@ -38,8 +51,22 @@ CREATE TABLE IF NOT EXISTS findora.wallets (
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     deleted_at TIMESTAMPTZ
 );
+CREATE INDEX IF NOT EXISTS idx_wallets_user ON findora.wallets(user_id);
 
--- 3. Bảng Transactions (Số nguyên int64 minor units, tuyệt đối không dùng float)
+-- Self-healing migration cho bảng wallets nếu trước đó lỡ tạo user_id UUID references auth.users
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'findora' AND table_name = 'wallets' AND column_name = 'user_id' AND data_type = 'uuid'
+    ) THEN
+        ALTER TABLE findora.wallets DROP CONSTRAINT IF EXISTS wallets_user_id_fkey;
+        ALTER TABLE findora.wallets ALTER COLUMN user_id TYPE TEXT;
+        ALTER TABLE findora.wallets ADD CONSTRAINT wallets_user_id_fkey FOREIGN KEY (user_id) REFERENCES findora.users(id) ON DELETE CASCADE;
+    END IF;
+END $$;
+
+-- 4. Bảng Transactions (Số nguyên int64 minor units, tuyệt đối không dùng float)
 CREATE TABLE IF NOT EXISTS findora.transactions (
     id TEXT PRIMARY KEY,
     wallet_id TEXT NOT NULL REFERENCES findora.wallets(id) ON DELETE CASCADE,
@@ -55,7 +82,7 @@ CREATE TABLE IF NOT EXISTS findora.transactions (
     sync_version BIGINT NOT NULL DEFAULT 1
 );
 
--- 4. High-Performance Covering Indexes trong Schema findora
+-- 5. High-Performance Covering Indexes trong Schema findora
 CREATE INDEX IF NOT EXISTS idx_tx_wallet_timestamp 
     ON findora.transactions(wallet_id, timestamp DESC) 
     WHERE deleted_at IS NULL;
@@ -67,7 +94,7 @@ CREATE INDEX IF NOT EXISTS idx_tx_category
 CREATE INDEX IF NOT EXISTS idx_tx_sync_version 
     ON findora.transactions(wallet_id, sync_version);
 
--- 5. Seed Danh mục mặc định (Chi tiêu & Nguồn thu nhập)
+-- 6. Seed Danh mục mặc định (Chi tiêu & Nguồn thu nhập)
 INSERT INTO findora.categories (id, name, icon, color, type) VALUES
     -- Phân loại Chi tiêu
     ('cat_food', 'Ăn uống', 'fork.knife', '#FF5722', 'EXPENSE'),
@@ -82,12 +109,11 @@ INSERT INTO findora.categories (id, name, icon, color, type) VALUES
     ('cat_bonus', 'Thưởng & Quà tặng', 'gift.fill', '#E91E63', 'INCOME')
 ON CONFLICT (id) DO NOTHING;
 
--- 6. Row Level Security (RLS) bảo vệ dữ liệu
+-- 7. Row Level Security (RLS) bảo vệ dữ liệu
 ALTER TABLE findora.categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE findora.wallets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE findora.transactions ENABLE ROW LEVEL SECURITY;
 
--- Cấp quyền đọc danh mục mặc định
 DO $$ 
 BEGIN
     IF NOT EXISTS (
@@ -95,16 +121,5 @@ BEGIN
         WHERE schemaname = 'findora' AND tablename = 'categories' AND policyname = 'Allow public read categories'
     ) THEN
         CREATE POLICY "Allow public read categories" ON findora.categories FOR SELECT USING (true);
-    END IF;
-END $$;
-
--- 7. Tự động cấp quyền cho findora_user (nếu có)
-DO $$ 
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'findora_user') THEN
-        GRANT USAGE ON SCHEMA findora TO findora_user;
-        GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA findora TO findora_user;
-        GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA findora TO findora_user;
-        ALTER DEFAULT PRIVILEGES IN SCHEMA findora GRANT ALL ON TABLES TO findora_user;
     END IF;
 END $$;
