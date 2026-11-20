@@ -29,9 +29,11 @@ async fn test_forgot_and_reset_password_workflow() {
         .expect("Migration failed");
 
     let config = Config::from_env().expect("Config must be valid");
+    let redis_service = Arc::new(findora_backend::redis_client::RedisService::disabled());
     let state = Arc::new(AppState {
         pool: Arc::new(pool.clone()),
         config,
+        redis: redis_service,
     });
 
     let test_email = "forgot_pwd_test@findora.app";

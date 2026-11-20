@@ -17,5 +17,11 @@ services:
         sync: false
       - key: SUPABASE_STORAGE_BUCKET
         value: findora_avatar_user
+      - key: REDIS_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
       - key: PORT
         value: 10000

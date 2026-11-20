@@ -10,12 +10,22 @@ pub async fn categories_handler(
     State(state): State<Arc<AppState>>,
     lang: Language,
 ) -> AppResult<Json<Vec<CategoryItem>>> {
+    let cache_key = format!("findora:cache:categories:{}", lang.code());
+
+    // 1. Thử lấy từ Redis Cache (Cache Hit -> ~1ms)
+    if let Some(cached_str) = state.redis.get(&cache_key).await {
+        if let Ok(cats) = serde_json::from_str::<Vec<CategoryItem>>(&cached_str) {
+            return Ok(Json(cats));
+        }
+    }
+
+    // 2. Cache Miss -> Truy vấn PostgreSQL
     let rows = sqlx::query("SELECT id, name, name_en, icon, color, type FROM findora.categories ORDER BY type, id")
         .fetch_all(&*state.pool)
         .await
         .map_err(AppError::Database)?;
 
-    let cats = rows
+    let cats: Vec<CategoryItem> = rows
         .into_iter()
         .map(|r| {
             let name_vi: String = r.get("name");
@@ -37,6 +47,11 @@ pub async fn categories_handler(
             }
         })
         .collect();
+
+    // 3. Ghi vào Redis Cache với TTL 1 giờ (3600 giây)
+    if let Ok(json_str) = serde_json::to_string(&cats) {
+        state.redis.set_ex(&cache_key, &json_str, 3600).await;
+    }
 
     Ok(Json(cats))
 }

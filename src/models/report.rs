@@ -7,7 +7,7 @@ pub struct MonthlyReportQuery {
     pub month: Option<u32>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CategorySummary {
     #[serde(rename = "categoryId")]
     pub category_id: String,
@@ -20,7 +20,7 @@ pub struct CategorySummary {
     pub percentage: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MonthlyReportResponse {
     pub year: i32,
     pub month: u32,

@@ -151,6 +151,12 @@ pub async fn create_transaction_handler(
 
     tx.commit().await.map_err(AppError::Database)?;
 
+    // Xóa Cache danh sách ví của user trong Redis vì số dư ví (current_balance) vừa thay đổi
+    state
+        .redis
+        .del(&format!("findora:cache:wallets:{}", auth.user_id))
+        .await;
+
     let item = TransactionItem {
         id: tx_id,
         wallet_id,

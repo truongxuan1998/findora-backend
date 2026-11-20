@@ -35,9 +35,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Chạy cơ chế self-healing & migration schema findora
     db::run_schema_and_migrations(&pool).await?;
 
+    // Khởi tạo Redis Service (Dual-Engine: TCP ConnectionManager + Upstash REST Fallback)
+    let redis_service = Arc::new(
+        findora_backend::redis_client::RedisService::new(
+            config.redis_url.as_deref(),
+            config.upstash_redis_rest_url.as_deref(),
+            config.upstash_redis_rest_token.as_deref(),
+        )
+        .await,
+    );
+
     let state = Arc::new(AppState {
         pool: Arc::new(pool),
         config: config.clone(),
+        redis: redis_service,
     });
 
     let cors = CorsLayer::new()

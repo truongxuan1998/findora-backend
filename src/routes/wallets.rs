@@ -12,6 +12,16 @@ pub async fn list_wallets_handler(
     State(state): State<Arc<AppState>>,
     auth: AuthenticatedUser,
 ) -> AppResult<Json<Vec<WalletItem>>> {
+    let cache_key = format!("findora:cache:wallets:{}", auth.user_id);
+
+    // 1. Thử đọc từ Redis Cache
+    if let Some(cached_str) = state.redis.get(&cache_key).await {
+        if let Ok(wallets) = serde_json::from_str::<Vec<WalletItem>>(&cached_str) {
+            return Ok(Json(wallets));
+        }
+    }
+
+    // 2. Cache Miss -> Truy vấn PostgreSQL
     let rows = sqlx::query(
         "SELECT id, user_id, name, currency, initial_balance, current_balance, created_at, updated_at
          FROM findora.wallets
@@ -23,7 +33,7 @@ pub async fn list_wallets_handler(
     .await
     .map_err(AppError::Database)?;
 
-    let wallets = rows
+    let wallets: Vec<WalletItem> = rows
         .into_iter()
         .map(|r| WalletItem {
             id: r.get("id"),
@@ -36,6 +46,11 @@ pub async fn list_wallets_handler(
             updated_at: r.get("updated_at"),
         })
         .collect();
+
+    // 3. Ghi vào Redis Cache với TTL 15 phút (900 giây)
+    if let Ok(json_str) = serde_json::to_string(&wallets) {
+        state.redis.set_ex(&cache_key, &json_str, 900).await;
+    }
 
     Ok(Json(wallets))
 }
@@ -78,6 +93,12 @@ pub async fn create_wallet_handler(
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     };
+
+    // Xóa Cache danh sách ví của user (Cache Invalidation)
+    state
+        .redis
+        .del(&format!("findora:cache:wallets:{}", auth.user_id))
+        .await;
 
     Ok((StatusCode::CREATED, Json(wallet)))
 }

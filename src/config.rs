@@ -9,6 +9,9 @@ pub struct Config {
     pub supabase_url: String,
     pub supabase_key: String,
     pub supabase_bucket: String,
+    pub redis_url: Option<String>,
+    pub upstash_redis_rest_url: Option<String>,
+    pub upstash_redis_rest_token: Option<String>,
 }
 
 impl Config {
@@ -38,6 +41,18 @@ impl Config {
         let supabase_bucket = env::var("SUPABASE_STORAGE_BUCKET")
             .unwrap_or_else(|_| "findora_avatar_user".to_string());
 
+        let redis_url = env::var("REDIS_URL")
+            .ok()
+            .filter(|s| !s.trim().is_empty());
+
+        let upstash_redis_rest_url = env::var("UPSTASH_REDIS_REST_URL")
+            .ok()
+            .filter(|s| !s.trim().is_empty());
+
+        let upstash_redis_rest_token = env::var("UPSTASH_REDIS_REST_TOKEN")
+            .ok()
+            .filter(|s| !s.trim().is_empty());
+
         Ok(Self {
             database_url,
             port,
@@ -46,6 +61,9 @@ impl Config {
             supabase_url,
             supabase_key,
             supabase_bucket,
+            redis_url,
+            upstash_redis_rest_url,
+            upstash_redis_rest_token,
         })
     }
 }

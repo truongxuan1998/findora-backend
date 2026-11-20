@@ -29,7 +29,7 @@ pub struct UpdateProfileRequest {
     pub phone_number: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct UserProfileResponse {
     pub id: String,
     pub email: String,
@@ -88,6 +88,12 @@ pub async fn upload_avatar_handler(
         .await
         .map_err(AppError::Database)?;
 
+    // Xóa cache User Profile trong Redis (Cache Invalidation)
+    state
+        .redis
+        .del(&format!("findora:cache:user:{}:profile", auth.user_id))
+        .await;
+
     info!(user_id = %auth.user_id, avatar_url = %avatar_url, "🎉 Đã cập nhật ảnh đại diện thành công vào database");
 
     Ok((
@@ -105,6 +111,16 @@ pub async fn get_profile_handler(
     lang: Language,
     auth: AuthenticatedUser,
 ) -> AppResult<Json<UserProfileResponse>> {
+    let cache_key = format!("findora:cache:user:{}:profile", auth.user_id);
+
+    // 1. Thử lấy Profile từ Redis Cache (TTL 30 phút)
+    if let Some(cached_str) = state.redis.get(&cache_key).await {
+        if let Ok(profile) = serde_json::from_str::<UserProfileResponse>(&cached_str) {
+            return Ok(Json(profile));
+        }
+    }
+
+    // 2. Cache Miss -> Truy vấn PostgreSQL
     let row = sqlx::query(
         "SELECT id, email, full_name, phone_number, avatar_url 
          FROM findora.users 
@@ -116,13 +132,20 @@ pub async fn get_profile_handler(
     .map_err(AppError::Database)?
     .ok_or_else(|| AppError::NotFound(i18n::msg_user_not_found(lang).into()))?;
 
-    Ok(Json(UserProfileResponse {
+    let profile = UserProfileResponse {
         id: row.get("id"),
         email: row.get("email"),
         full_name: row.get("full_name"),
         phone_number: row.get("phone_number"),
         avatar_url: row.get("avatar_url"),
-    }))
+    };
+
+    // 3. Ghi vào Redis Cache với TTL 30 phút (1800 giây)
+    if let Ok(json_str) = serde_json::to_string(&profile) {
+        state.redis.set_ex(&cache_key, &json_str, 1800).await;
+    }
+
+    Ok(Json(profile))
 }
 
 pub async fn update_profile_handler(
@@ -152,11 +175,19 @@ pub async fn update_profile_handler(
     .await
     .map_err(AppError::Database)?;
 
-    Ok(Json(UserProfileResponse {
+    let res = UserProfileResponse {
         id: row.get("id"),
         email: row.get("email"),
         full_name: row.get("full_name"),
         phone_number: row.get("phone_number"),
         avatar_url: row.get("avatar_url"),
-    }))
+    };
+
+    // Xóa cache User Profile trong Redis (Cache Invalidation)
+    state
+        .redis
+        .del(&format!("findora:cache:user:{}:profile", auth.user_id))
+        .await;
+
+    Ok(Json(res))
 }

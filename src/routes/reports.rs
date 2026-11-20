@@ -46,6 +46,21 @@ pub async fn monthly_report_handler(
     let end_millis = end_dt.timestamp_millis();
 
     let user_id = auth.0.map(|u| u.user_id);
+    let cache_key = format!(
+        "findora:cache:report:{}:{}:{}:{}:{}",
+        user_id.as_deref().unwrap_or("anon"),
+        year,
+        month,
+        query.wallet_id.as_deref().unwrap_or("all"),
+        lang.code()
+    );
+
+    // 1. Thử lấy từ Redis Cache (Cache Hit -> bỏ qua toàn bộ query SUM & Group By phức tạp)
+    if let Some(cached_str) = state.redis.get(&cache_key).await {
+        if let Ok(report) = serde_json::from_str::<MonthlyReportResponse>(&cached_str) {
+            return Ok(Json(report));
+        }
+    }
 
     // 1. Tính tổng Thu và Chi chuẩn xác theo khoảng thời gian và user/wallet
     let totals_rows = sqlx::query(
@@ -180,7 +195,7 @@ pub async fn monthly_report_handler(
         })
         .collect();
 
-    Ok(Json(MonthlyReportResponse {
+    let response = MonthlyReportResponse {
         year,
         month,
         total_income,
@@ -188,5 +203,12 @@ pub async fn monthly_report_handler(
         net_balance: total_income - total_expense,
         expense_breakdown,
         income_breakdown,
-    }))
+    };
+
+    // 2. Ghi vào Redis Cache với TTL 10 phút (600 giây)
+    if let Ok(json_str) = serde_json::to_string(&response) {
+        state.redis.set_ex(&cache_key, &json_str, 600).await;
+    }
+
+    Ok(Json(response))
 }

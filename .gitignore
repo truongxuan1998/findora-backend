@@ -17,6 +17,10 @@ service_account.json
 # Rust & Cargo build outputs
 /target
 
+# Node.js
+node_modules/
+package-lock.json
+
 # Operating System & IDE Files
 .DS_Store
 .idea/
