@@ -6,6 +6,8 @@ pub struct RegisterRequest {
     #[serde(alias = "fullName")]
     pub full_name: String,
     pub password: String,
+    #[serde(alias = "confirmPassword", default)]
+    pub confirm_password: Option<String>,
     #[serde(alias = "phoneNumber", default)]
     pub phone_number: Option<String>,
 }

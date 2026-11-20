@@ -130,6 +130,13 @@ pub fn msg_password_need_special(lang: Language) -> &'static str {
     }
 }
 
+pub fn msg_password_mismatch(lang: Language) -> &'static str {
+    match lang {
+        Language::Vi => "Mật khẩu xác nhận phải trùng với mật khẩu",
+        Language::En => "Confirm password must match password",
+    }
+}
+
 pub fn msg_user_not_found(lang: Language) -> &'static str {
     match lang {
         Language::Vi => "Người dùng không tồn tại",
@@ -185,4 +192,25 @@ pub fn msg_no_wallet_available(lang: Language) -> &'static str {
         Language::En => "You do not have any wallets. Please create a wallet first.",
     }
 }
+
+pub fn msg_account_locked_until_tomorrow(lang: Language) -> &'static str {
+    match lang {
+        Language::Vi => "Tài khoản của bạn đã bị tạm khóa do nhập sai mật khẩu quá 8 lần. Vui lòng quay lại vào ngày mai (sau 00:00).",
+        Language::En => "Your account is temporarily locked due to exceeding 8 failed login attempts. Please try again tomorrow (after 00:00).",
+    }
+}
+
+pub fn msg_wrong_password_with_remaining(lang: Language, remaining: u32) -> String {
+    match lang {
+        Language::Vi => format!(
+            "Mật khẩu không chính xác. Bạn còn {} lần thử trước khi tài khoản bị khóa đến ngày mai.",
+            remaining
+        ),
+        Language::En => format!(
+            "Incorrect password. You have {} attempt(s) remaining before your account is locked until tomorrow.",
+            remaining
+        ),
+    }
+}
+
 

@@ -50,6 +50,13 @@ pub async fn register_handler(
         return Err(AppError::BadRequest(i18n::msg_empty_name(lang).into()));
     }
 
+    // Nếu client gửi confirm_password, kiểm tra trùng khớp
+    if let Some(ref confirm_pw) = payload.confirm_password {
+        if confirm_pw != &payload.password {
+            return Err(AppError::BadRequest(i18n::msg_password_mismatch(lang).into()));
+        }
+    }
+
     validate_password(&payload.password, lang)?;
 
     let hashed_pw = hash(&payload.password, DEFAULT_COST)
@@ -127,9 +134,13 @@ pub async fn login_handler(
     Json(payload): Json<LoginRequest>,
 ) -> AppResult<Json<AuthResponse>> {
     let email = payload.email.trim().to_lowercase();
+    let now_utc = chrono::Utc::now();
+    let vn_offset = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
+    let now_vn = now_utc.with_timezone(&vn_offset);
 
     let user_row = sqlx::query(
-        "SELECT id, email, full_name, phone_number, password_hash 
+        "SELECT id, email, full_name, phone_number, password_hash, 
+                failed_login_attempts, locked_until, last_failed_at
          FROM findora.users 
          WHERE email = $1"
     )
@@ -147,19 +158,121 @@ pub async fn login_handler(
         }
     };
 
+    let user_id: String = row.get("id");
     let pw_hash: String = row.get("password_hash");
-    let is_valid = verify(&payload.password, &pw_hash).unwrap_or(false);
+    let mut failed_attempts: i32 = row.get("failed_login_attempts");
+    let locked_until: Option<chrono::DateTime<chrono::Utc>> = row.get("locked_until");
+    let last_failed_at: Option<chrono::DateTime<chrono::Utc>> = row.get("last_failed_at");
 
-    if !is_valid {
-        warn!(email = %email, "Đăng nhập thất bại: Sai mật khẩu");
-        return Err(AppError::Unauthorized(i18n::msg_invalid_credentials(lang).into()));
+    // 1. Kiểm tra nếu tài khoản đang bị khóa do vượt quá số lần nhập sai
+    if let Some(lock_time) = locked_until {
+        if now_utc < lock_time {
+            warn!(email = %email, locked_until = %lock_time, "Tài khoản bị từ chối đăng nhập do đang trong thời gian khóa");
+            return Err(AppError::TooManyRequests(
+                i18n::msg_account_locked_until_tomorrow(lang).to_string(),
+            ));
+        }
+        // Nếu đã qua mốc khóa (sang ngày mới), reset số lần vi phạm
+        failed_attempts = 0;
+    } else if let Some(last_failed) = last_failed_at {
+        // Nếu lần nhập sai gần nhất là từ ngày hôm trước (theo giờ VN), reset số lần
+        let last_failed_vn = last_failed.with_timezone(&vn_offset);
+        if last_failed_vn.date_naive() < now_vn.date_naive() {
+            failed_attempts = 0;
+        }
     }
 
-    let user_id: String = row.get("id");
+    let is_valid = verify(&payload.password, &pw_hash).unwrap_or(false);
+
+    // 2. Trường hợp Mật khẩu SAI
+    if !is_valid {
+        let new_failed = failed_attempts + 1;
+        const MAX_FAILED_ATTEMPTS: i32 = 8;
+
+        if new_failed >= MAX_FAILED_ATTEMPTS {
+            // Khóa tài khoản đến 00:00:00 ngày hôm sau theo múi giờ Việt Nam
+            let tomorrow_vn = now_vn.date_naive() + chrono::Days::new(1);
+            let lock_until_vn = tomorrow_vn
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_local_timezone(vn_offset)
+                .unwrap();
+            let lock_until_utc = lock_until_vn.with_timezone(&chrono::Utc);
+
+            sqlx::query(
+                "UPDATE findora.users 
+                 SET failed_login_attempts = $1, 
+                     locked_until = $2, 
+                     last_failed_at = NOW(), 
+                     updated_at = NOW() 
+                 WHERE id = $3"
+            )
+            .bind(new_failed)
+            .bind(lock_until_utc)
+            .bind(&user_id)
+            .execute(&*state.pool)
+            .await
+            .map_err(AppError::Database)?;
+
+            warn!(
+                email = %email,
+                failed_attempts = new_failed,
+                locked_until = %lock_until_vn,
+                "🚨 Tài khoản đã nhập sai mật khẩu 8 lần và bị khóa đến 00:00 ngày hôm sau"
+            );
+
+            return Err(AppError::TooManyRequests(
+                i18n::msg_account_locked_until_tomorrow(lang).to_string(),
+            ));
+        } else {
+            let remaining = (MAX_FAILED_ATTEMPTS - new_failed) as u32;
+
+            sqlx::query(
+                "UPDATE findora.users 
+                 SET failed_login_attempts = $1, 
+                     last_failed_at = NOW(), 
+                     updated_at = NOW() 
+                 WHERE id = $2"
+            )
+            .bind(new_failed)
+            .bind(&user_id)
+            .execute(&*state.pool)
+            .await
+            .map_err(AppError::Database)?;
+
+            warn!(
+                email = %email,
+                failed_attempts = new_failed,
+                remaining = remaining,
+                "Nhập sai mật khẩu"
+            );
+
+            return Err(AppError::Unauthorized(
+                i18n::msg_wrong_password_with_remaining(lang, remaining),
+            ));
+        }
+    }
+
+    // 3. Trường hợp Mật khẩu ĐÚNG -> Reset toàn bộ trạng thái lỗi về 0
+    if failed_attempts > 0 || locked_until.is_some() || last_failed_at.is_some() {
+        sqlx::query(
+            "UPDATE findora.users 
+             SET failed_login_attempts = 0, 
+                 locked_until = NULL, 
+                 last_failed_at = NULL, 
+                 updated_at = NOW() 
+             WHERE id = $1"
+        )
+        .bind(&user_id)
+        .execute(&*state.pool)
+        .await
+        .map_err(AppError::Database)?;
+    }
+
     let full_name: String = row.get("full_name");
     let phone_number: String = row.get("phone_number");
 
-    info!(user_id = %user_id, email = %email, lang = %lang.code(), "🔐 Đăng nhập thành công, đang cấp JWT token");
+    info!(user_id = %user_id, email = %email, lang = %lang.code(), "🔐 Đăng nhập thành công, đã reset rate limit attempts");
 
     let token = create_jwt(&user_id, &email, &state.config.jwt_secret, 30)?;
 

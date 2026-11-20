@@ -13,6 +13,7 @@ pub enum AppError {
     Forbidden(String),
     NotFound(String),
     Conflict(String),
+    TooManyRequests(String),
     Internal(String),
     Database(sqlx::Error),
 }
@@ -39,6 +40,7 @@ impl IntoResponse for AppError {
             AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg, "FORBIDDEN"),
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg, "NOT_FOUND"),
             AppError::Conflict(msg) => (StatusCode::CONFLICT, msg, "CONFLICT"),
+            AppError::TooManyRequests(msg) => (StatusCode::TOO_MANY_REQUESTS, msg, "TOO_MANY_REQUESTS"),
             AppError::Internal(msg) => {
                 tracing::error!("Lỗi hệ thống nội bộ: {}", msg);
                 (StatusCode::INTERNAL_SERVER_ERROR, "Lỗi máy chủ nội bộ".to_string(), "INTERNAL_ERROR")

@@ -49,7 +49,7 @@ pub async fn run_schema_and_migrations(pool: &PgPool) -> Result<(), sqlx::Error>
         .execute(pool)
         .await?;
 
-    // 2. Bảng Users
+    // 2. Bảng Users (hỗ trợ Rate Limit sai mật khẩu & Lockout qua ngày)
     sqlx::raw_sql(
         "CREATE TABLE IF NOT EXISTS findora.users (
             id TEXT PRIMARY KEY,
@@ -59,8 +59,14 @@ pub async fn run_schema_and_migrations(pool: &PgPool) -> Result<(), sqlx::Error>
             password_hash TEXT NOT NULL,
             avatar_url TEXT DEFAULT '',
             created_at TIMESTAMPTZ DEFAULT NOW(),
-            updated_at TIMESTAMPTZ DEFAULT NOW()
+            updated_at TIMESTAMPTZ DEFAULT NOW(),
+            failed_login_attempts INT NOT NULL DEFAULT 0,
+            locked_until TIMESTAMPTZ,
+            last_failed_at TIMESTAMPTZ
         );
+        ALTER TABLE findora.users ADD COLUMN IF NOT EXISTS failed_login_attempts INT NOT NULL DEFAULT 0;
+        ALTER TABLE findora.users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ;
+        ALTER TABLE findora.users ADD COLUMN IF NOT EXISTS last_failed_at TIMESTAMPTZ;
         CREATE INDEX IF NOT EXISTS idx_users_email ON findora.users(email);",
     )
     .execute(pool)
