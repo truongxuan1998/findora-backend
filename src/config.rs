@@ -36,7 +36,7 @@ impl Config {
             .unwrap_or_default();
 
         let supabase_bucket = env::var("SUPABASE_STORAGE_BUCKET")
-            .unwrap_or_else(|_| "findora-avatars".to_string());
+            .unwrap_or_else(|_| "findora_avatar_user".to_string());
 
         Ok(Self {
             database_url,

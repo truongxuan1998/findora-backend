@@ -16,6 +16,6 @@ services:
       - key: SUPABASE_KEY
         sync: false
       - key: SUPABASE_STORAGE_BUCKET
-        value: findora-avatars
+        value: findora_avatar_user
       - key: PORT
         value: 10000
