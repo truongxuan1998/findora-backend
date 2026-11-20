@@ -381,7 +381,8 @@ pub async fn forgot_password_handler(
 
     let reset_id = format!("rst_{}", Uuid::new_v4().simple());
     let vn_offset = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
-    let expires_at = (chrono::Utc::now() + chrono::Duration::minutes(15)).with_timezone(&vn_offset);
+    // Hạn hiệu lực của mã OTP: 120 giây (2 phút)
+    let expires_at = (chrono::Utc::now() + chrono::Duration::seconds(120)).with_timezone(&vn_offset);
 
     sqlx::query(
         "INSERT INTO findora.password_resets (id, email, code, expires_at, created_at)
@@ -398,7 +399,7 @@ pub async fn forgot_password_handler(
     info!(
         email = %email,
         expires_at = %expires_at,
-        "🔑 Đã phát hành mã xác thực quên mật khẩu 6 số (hết hạn trong 15 phút, lưu an toàn trong database)"
+        "🔑 Đã phát hành mã xác thực quên mật khẩu 6 số (hết hạn trong 120 giây, lưu an toàn trong database)"
     );
 
     // Gửi email chứa mã OTP qua Brevo Service trong background task (non-blocking)

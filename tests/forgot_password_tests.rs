@@ -138,4 +138,25 @@ async fn test_forgot_and_reset_password_workflow() {
         .expect("Đăng nhập bằng mật khẩu mới phải thành công");
 
     assert!(login_res.0.token.is_some());
+
+    // 8. Kiểm tra cơ chế timeout 120 giây: Mã hết hạn (> 120s) phải bị từ chối
+    let expired_code = "888888";
+    let _ = sqlx::query(
+        "INSERT INTO findora.password_resets (id, email, code, expires_at, created_at)
+         VALUES ('rst_expired_test', $1, $2, NOW() - INTERVAL '1 second', NOW() - INTERVAL '121 seconds')"
+    )
+    .bind(test_email)
+    .bind(expired_code)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let timeout_req = ResetPasswordRequest {
+        email: test_email.to_string(),
+        code: expired_code.to_string(),
+        new_password: "AnotherPassword2026!".to_string(),
+        confirm_password: Some("AnotherPassword2026!".to_string()),
+    };
+    let timeout_res = reset_password_handler(State(state.clone()), Language::Vi, Json(timeout_req)).await;
+    assert!(timeout_res.is_err(), "Mã hết hạn 120s phải bị từ chối");
 }

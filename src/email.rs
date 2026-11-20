@@ -163,7 +163,7 @@ fn generate_otp_email_html(code: &str, lang: Language) -> String {
                             </div>
 
                             <p style="margin: 0 0 16px; color: #ef4444; font-size: 14px; font-weight: 600; text-align: center;">
-                                ⏱️ Mã xác thực này có hiệu lực trong vòng 15 phút.
+                                ⏱️ Mã xác thực này có hiệu lực trong vòng 120 giây (2 phút).
                             </p>
 
                             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 28px 0;">
@@ -218,7 +218,7 @@ fn generate_otp_email_html(code: &str, lang: Language) -> String {
                             </div>
 
                             <p style="margin: 0 0 16px; color: #ef4444; font-size: 14px; font-weight: 600; text-align: center;">
-                                ⏱️ This verification code expires in 15 minutes.
+                                ⏱️ This verification code expires in 120 seconds (2 minutes).
                             </p>
 
                             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 28px 0;">
