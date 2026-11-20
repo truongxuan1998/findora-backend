@@ -29,3 +29,4 @@ package-lock.json
 *.swo
 *~
 *.log
+.infisical.yaml
