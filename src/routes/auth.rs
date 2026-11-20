@@ -9,6 +9,30 @@ use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+/// Kiểm tra độ phức tạp của mật khẩu: ít nhất 8 ký tự, có số, có ký tự đặc biệt, không quá 72 ký tự
+pub fn validate_password(password: &str) -> AppResult<()> {
+    if password.len() < 8 {
+        return Err(AppError::BadRequest("Mật khẩu phải chứa ít nhất 8 ký tự".into()));
+    }
+
+    if password.len() > 72 {
+        return Err(AppError::BadRequest("Mật khẩu không được vượt quá 72 ký tự".into()));
+    }
+
+    let has_digit = password.chars().any(|c| c.is_ascii_digit());
+    let has_special = password.chars().any(|c| !c.is_alphanumeric());
+
+    if !has_digit {
+        return Err(AppError::BadRequest("Mật khẩu phải chứa ít nhất một chữ số (0-9)".into()));
+    }
+
+    if !has_special {
+        return Err(AppError::BadRequest("Mật khẩu phải chứa ít nhất một ký tự đặc biệt (!@#$%^&*...)".into()));
+    }
+
+    Ok(())
+}
+
 pub async fn register_handler(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<RegisterRequest>,
@@ -24,13 +48,7 @@ pub async fn register_handler(
         return Err(AppError::BadRequest("Họ và tên không được để trống".into()));
     }
 
-    if payload.password.len() < 6 {
-        return Err(AppError::BadRequest("Mật khẩu phải chứa ít nhất 6 ký tự".into()));
-    }
-
-    if payload.password.len() > 72 {
-        return Err(AppError::BadRequest("Mật khẩu không được vượt quá 72 ký tự".into()));
-    }
+    validate_password(&payload.password)?;
 
     let hashed_pw = hash(&payload.password, DEFAULT_COST)
         .map_err(|e| AppError::Internal(format!("Lỗi mã hóa mật khẩu: {}", e)))?;
@@ -173,4 +191,45 @@ pub async fn me_handler(
         full_name: row.get("full_name"),
         phone_number: row.get("phone_number"),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_password_valid() {
+        assert!(validate_password("Password123!").is_ok());
+        assert!(validate_password("Secure@2026").is_ok());
+        assert!(validate_password("Abc#1234").is_ok());
+    }
+
+    #[test]
+    fn test_password_too_short() {
+        let res = validate_password("Abc1!");
+        assert!(res.is_err());
+        assert!(matches!(res.unwrap_err(), AppError::BadRequest(msg) if msg.contains("ít nhất 8 ký tự")));
+    }
+
+    #[test]
+    fn test_password_no_digit() {
+        let res = validate_password("Password!@#");
+        assert!(res.is_err());
+        assert!(matches!(res.unwrap_err(), AppError::BadRequest(msg) if msg.contains("chữ số")));
+    }
+
+    #[test]
+    fn test_password_no_special() {
+        let res = validate_password("Password123");
+        assert!(res.is_err());
+        assert!(matches!(res.unwrap_err(), AppError::BadRequest(msg) if msg.contains("ký tự đặc biệt")));
+    }
+
+    #[test]
+    fn test_password_too_long() {
+        let long_pw = "A1!".repeat(25); // 75 chars
+        let res = validate_password(&long_pw);
+        assert!(res.is_err());
+        assert!(matches!(res.unwrap_err(), AppError::BadRequest(msg) if msg.contains("không được vượt quá 72 ký tự")));
+    }
 }
