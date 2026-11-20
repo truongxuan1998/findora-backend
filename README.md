@@ -13,6 +13,11 @@ High-performance, memory-efficient backend service for the **Findora** personal 
   - `GET /api/categories` — List active categories.
   - `GET /api/reports/monthly` — Aggregated monthly balance & breakdown.
 
+## 🌐 Live Production URL
+- **Production API:** `https://findora-backend-zpr5.onrender.com`
+- **Health Check:** `https://findora-backend-zpr5.onrender.com/health`
+- **Region:** Singapore (Cloudflare CDN + Render Docker)
+
 ## 🛠 Local Development
 ```bash
 # 1. Copy env
