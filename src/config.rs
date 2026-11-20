@@ -6,6 +6,9 @@ pub struct Config {
     pub port: u16,
     pub jwt_secret: String,
     pub env: String,
+    pub supabase_url: String,
+    pub supabase_key: String,
+    pub supabase_bucket: String,
 }
 
 impl Config {
@@ -24,11 +27,25 @@ impl Config {
         let env = env::var("APP_ENV")
             .unwrap_or_else(|_| "production".to_string());
 
+        // Cấu hình Supabase Storage
+        let supabase_url = env::var("SUPABASE_URL")
+            .unwrap_or_else(|_| "https://jbqwbiqrylkiwqhjwgfn.supabase.co".to_string());
+
+        let supabase_key = env::var("SUPABASE_SERVICE_KEY")
+            .or_else(|_| env::var("SUPABASE_KEY"))
+            .unwrap_or_default();
+
+        let supabase_bucket = env::var("SUPABASE_STORAGE_BUCKET")
+            .unwrap_or_else(|_| "findora-avatars".to_string());
+
         Ok(Self {
             database_url,
             port,
             jwt_secret,
             env,
+            supabase_url,
+            supabase_key,
+            supabase_bucket,
         })
     }
 }

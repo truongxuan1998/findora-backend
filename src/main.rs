@@ -2,8 +2,10 @@ mod auth;
 mod config;
 mod db;
 mod errors;
+mod image_validator;
 mod models;
 mod routes;
+mod storage;
 
 use config::Config;
 use dotenvy::dotenv;
