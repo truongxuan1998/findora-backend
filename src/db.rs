@@ -6,6 +6,7 @@ use tracing::info;
 
 pub async fn create_pool(db_url: &str) -> Result<PgPool, sqlx::Error> {
     let connect_opts = PgConnectOptions::from_str(db_url)?
+        .options([("timezone", "Asia/Ho_Chi_Minh")])
         .statement_cache_capacity(0); // Bắt buộc vô hiệu hóa statement cache cho Supabase PgBouncer/Transaction Pooler
 
     let pool = PgPoolOptions::new()
@@ -13,15 +14,35 @@ pub async fn create_pool(db_url: &str) -> Result<PgPool, sqlx::Error> {
         .min_connections(1)
         .acquire_timeout(Duration::from_secs(5))
         .idle_timeout(Duration::from_secs(300))
+        .after_connect(|conn, _meta| {
+            Box::pin(async move {
+                sqlx::query("SET TIME ZONE 'Asia/Ho_Chi_Minh'").execute(conn).await?;
+                Ok(())
+            })
+        })
         .connect_with(connect_opts)
         .await?;
 
-    info!("✅ Kết nối Supabase PostgreSQL thành công! (Pool size: max 5, timeout 5s)");
+    info!("✅ Kết nối Supabase PostgreSQL thành công! (Pool size: max 5, timezone: Asia/Ho_Chi_Minh)");
     Ok(pool)
 }
 
 pub async fn run_schema_and_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     info!("🔄 Đang tự động kiểm tra và chuẩn hóa schema cơ sở dữ liệu 'findora'...");
+
+    // 0. Cấu hình Múi giờ Việt Nam (Asia/Ho_Chi_Minh, UTC+7) toàn diện cho DB và Session
+    let _ = sqlx::raw_sql(
+        "DO $$
+        BEGIN
+            EXECUTE 'ALTER DATABASE postgres SET timezone TO ''Asia/Ho_Chi_Minh''';
+            EXECUTE 'ALTER ROLE postgres SET timezone TO ''Asia/Ho_Chi_Minh''';
+        EXCEPTION WHEN OTHERS THEN
+            NULL;
+        END $$;
+        SET TIME ZONE 'Asia/Ho_Chi_Minh';"
+    )
+    .execute(pool)
+    .await;
 
     // 1. Tạo schema findora
     sqlx::raw_sql("CREATE SCHEMA IF NOT EXISTS findora;")
@@ -127,8 +148,11 @@ pub async fn run_schema_and_migrations(pool: &PgPool) -> Result<(), sqlx::Error>
             created_at BIGINT NOT NULL,         -- Unix millis
             updated_at BIGINT NOT NULL,         -- Unix millis
             deleted_at BIGINT,                  -- Soft delete tombstone
-            sync_version BIGINT NOT NULL DEFAULT 1
+            sync_version BIGINT NOT NULL DEFAULT 1,
+            created_at_tz TIMESTAMPTZ DEFAULT NOW()
         );
+        ALTER TABLE findora.transactions ADD COLUMN IF NOT EXISTS created_at_tz TIMESTAMPTZ DEFAULT NOW();
+        UPDATE findora.transactions SET created_at_tz = to_timestamp(timestamp / 1000.0) WHERE created_at_tz IS NULL;
         CREATE INDEX IF NOT EXISTS idx_tx_wallet_timestamp 
             ON findora.transactions(wallet_id, timestamp DESC) 
             WHERE deleted_at IS NULL;
@@ -140,6 +164,38 @@ pub async fn run_schema_and_migrations(pool: &PgPool) -> Result<(), sqlx::Error>
     )
     .execute(pool)
     .await?;
+
+    // 6. Cấu hình Storage RLS Policies cho Supabase Storage Bucket 'findora_avatar_user'
+    let _ = sqlx::raw_sql(
+        "DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'Public Access findora_avatar_user'
+            ) THEN
+                CREATE POLICY \"Public Access findora_avatar_user\"
+                ON storage.objects FOR SELECT
+                USING (bucket_id IN ('findora_avatar_user', 'findora-avatars'));
+            END IF;
+
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'Allow Upload findora_avatar_user'
+            ) THEN
+                CREATE POLICY \"Allow Upload findora_avatar_user\"
+                ON storage.objects FOR INSERT
+                WITH CHECK (bucket_id IN ('findora_avatar_user', 'findora-avatars'));
+            END IF;
+
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'Allow Update findora_avatar_user'
+            ) THEN
+                CREATE POLICY \"Allow Update findora_avatar_user\"
+                ON storage.objects FOR UPDATE
+                USING (bucket_id IN ('findora_avatar_user', 'findora-avatars'));
+            END IF;
+        END $$;"
+    )
+    .execute(pool)
+    .await;
 
     info!("🎯 Database schema Findora hoàn toàn sẵn sàng & chuẩn hóa.");
     Ok(())

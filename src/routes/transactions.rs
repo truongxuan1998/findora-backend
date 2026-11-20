@@ -117,8 +117,8 @@ pub async fn create_transaction_handler(
 
     // 2. Insert transaction
     sqlx::query(
-        "INSERT INTO findora.transactions (id, wallet_id, amount, currency, tx_type, category_id, timestamp, note, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)"
+        "INSERT INTO findora.transactions (id, wallet_id, amount, currency, tx_type, category_id, timestamp, note, created_at, updated_at, created_at_tz)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9, to_timestamp($7 / 1000.0))"
     )
     .bind(&tx_id)
     .bind(&wallet_id)

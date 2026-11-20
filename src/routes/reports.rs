@@ -17,14 +17,19 @@ pub async fn monthly_report_handler(
     auth: OptionalUser,
     Query(query): Query<MonthlyReportQuery>,
 ) -> AppResult<Json<MonthlyReportResponse>> {
-    let now = chrono::Utc::now();
-    let year = query.year.unwrap_or_else(|| now.year());
-    let month = query.month.unwrap_or_else(|| now.month()).clamp(1, 12);
+    let vn_offset = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
+    let now_vn = chrono::Utc::now().with_timezone(&vn_offset);
+    let year = query.year.unwrap_or_else(|| now_vn.year());
+    let month = query.month.unwrap_or_else(|| now_vn.month()).clamp(1, 12);
 
-    // Tính mốc thời gian đầu tháng và cuối tháng (Unix timestamp milliseconds)
+    // Tính mốc thời gian đầu tháng và cuối tháng theo Múi giờ Việt Nam (UTC+7)
     let start_date = NaiveDate::from_ymd_opt(year, month, 1)
         .ok_or_else(|| AppError::BadRequest("Năm hoặc tháng không hợp lệ".into()))?;
-    let start_dt = start_date.and_hms_opt(0, 0, 0).unwrap().and_utc();
+    let start_dt = start_date
+        .and_hms_opt(0, 0, 0)
+        .unwrap()
+        .and_local_timezone(vn_offset)
+        .unwrap();
     let start_millis = start_dt.timestamp_millis();
 
     let next_month_date = if month == 12 {
@@ -33,7 +38,11 @@ pub async fn monthly_report_handler(
         NaiveDate::from_ymd_opt(year, month + 1, 1)
     }
     .unwrap();
-    let end_dt = next_month_date.and_hms_opt(0, 0, 0).unwrap().and_utc();
+    let end_dt = next_month_date
+        .and_hms_opt(0, 0, 0)
+        .unwrap()
+        .and_local_timezone(vn_offset)
+        .unwrap();
     let end_millis = end_dt.timestamp_millis();
 
     let user_id = auth.0.map(|u| u.user_id);
