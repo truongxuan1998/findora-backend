@@ -21,6 +21,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         // Authentication
         .route("/api/auth/register", post(auth::register_handler))
         .route("/api/auth/login", post(auth::login_handler))
+        .route("/api/auth/logout", post(auth::logout_handler))
         .route("/api/auth/me", get(auth::me_handler))
         // User Profile & Avatar Upload (Multipart Form-Data)
         .route("/api/users/profile", get(users::get_profile_handler).put(users::update_profile_handler))

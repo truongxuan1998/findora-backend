@@ -193,6 +193,17 @@ pub async fn me_handler(
     }))
 }
 
+pub async fn logout_handler(
+    auth: AuthenticatedUser,
+) -> AppResult<Json<serde_json::Value>> {
+    info!(user_id = %auth.user_id, email = %auth.email, "🚪 [USER LOGOUT] Người dùng đã đăng xuất an toàn khỏi thiết bị");
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "message": "Đăng xuất tài khoản thành công"
+    })))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
