@@ -213,4 +213,32 @@ pub fn msg_wrong_password_with_remaining(lang: Language, remaining: u32) -> Stri
     }
 }
 
+pub fn msg_forgot_password_sent(lang: Language) -> &'static str {
+    match lang {
+        Language::Vi => "Mã xác nhận đặt lại mật khẩu đã được tạo (hết hạn trong 15 phút).",
+        Language::En => "Password reset code has been generated (expires in 15 minutes).",
+    }
+}
+
+pub fn msg_invalid_or_expired_code(lang: Language) -> &'static str {
+    match lang {
+        Language::Vi => "Mã xác nhận không chính xác hoặc đã hết hạn",
+        Language::En => "Invalid or expired reset code",
+    }
+}
+
+pub fn msg_reset_password_success(lang: Language) -> &'static str {
+    match lang {
+        Language::Vi => "Đặt lại mật khẩu thành công! Tài khoản đã được mở khóa.",
+        Language::En => "Password reset successfully! Account has been unlocked.",
+    }
+}
+
+pub fn msg_too_many_reset_requests(lang: Language) -> &'static str {
+    match lang {
+        Language::Vi => "Bạn đã yêu cầu đặt lại mật khẩu quá nhiều lần. Vui lòng thử lại sau 15 phút.",
+        Language::En => "Too many password reset requests. Please try again after 15 minutes.",
+    }
+}
+
 

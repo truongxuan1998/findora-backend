@@ -35,3 +35,26 @@ pub struct AuthResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<UserResponse>,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct ForgotPasswordRequest {
+    pub email: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ForgotPasswordResponse {
+    pub success: bool,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reset_code: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ResetPasswordRequest {
+    pub email: String,
+    pub code: String,
+    #[serde(alias = "newPassword")]
+    pub new_password: String,
+    #[serde(alias = "confirmPassword", default)]
+    pub confirm_password: Option<String>,
+}

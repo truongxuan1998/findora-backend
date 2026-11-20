@@ -6,6 +6,7 @@ pub mod errors;
 pub mod i18n;
 pub mod image_validator;
 pub mod models;
+pub mod rate_limiter;
 pub mod routes;
 pub mod storage;
 

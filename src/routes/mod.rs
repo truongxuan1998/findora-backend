@@ -22,6 +22,8 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/auth/register", post(auth::register_handler))
         .route("/api/auth/login", post(auth::login_handler))
         .route("/api/auth/logout", post(auth::logout_handler))
+        .route("/api/auth/forgot-password", post(auth::forgot_password_handler))
+        .route("/api/auth/reset-password", post(auth::reset_password_handler))
         .route("/api/auth/me", get(auth::me_handler))
         // User Profile & Avatar Upload (Multipart Form-Data)
         .route("/api/users/profile", get(users::get_profile_handler).put(users::update_profile_handler))
@@ -34,6 +36,8 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/transactions", get(transactions::list_transactions_handler).post(transactions::create_transaction_handler))
         // Reports
         .route("/api/reports/monthly", get(reports::monthly_report_handler))
+        // Rate Limiter DDoS Middleware: Giới hạn tần suất request theo IP (Strict cho Auth/Upload, General cho API)
+        .layer(axum::middleware::from_fn(crate::rate_limiter::rate_limit_middleware))
         // Audit Middleware: Ghi nhận IP, Location, Device Name, OS Version cho mọi request
         .layer(axum::middleware::from_fn(crate::audit::audit_log_middleware))
         .with_state(state)

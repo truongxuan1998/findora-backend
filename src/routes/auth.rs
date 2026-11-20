@@ -1,7 +1,10 @@
 use crate::auth::{create_jwt, AuthenticatedUser};
 use crate::errors::{AppError, AppResult};
 use crate::i18n::{self, Language};
-use crate::models::user::{AuthResponse, LoginRequest, RegisterRequest, UserResponse};
+use crate::models::user::{
+    AuthResponse, ForgotPasswordRequest, ForgotPasswordResponse, LoginRequest, RegisterRequest,
+    ResetPasswordRequest, UserResponse,
+};
 use crate::AppState;
 use axum::{extract::State, http::StatusCode, Json};
 use bcrypt::{hash, verify, DEFAULT_COST};
@@ -323,5 +326,203 @@ pub async fn logout_handler(
         "success": true,
         "message": i18n::msg_logout_success(lang)
     })))
+}
+
+/// 4. Yêu cầu mã xác nhận Quên mật khẩu (POST /api/auth/forgot-password)
+pub async fn forgot_password_handler(
+    State(state): State<Arc<AppState>>,
+    lang: Language,
+    Json(payload): Json<ForgotPasswordRequest>,
+) -> AppResult<Json<ForgotPasswordResponse>> {
+    let email = payload.email.trim().to_lowercase();
+    if email.is_empty() {
+        return Err(AppError::BadRequest("Email không được để trống".into()));
+    }
+
+    // Kiểm tra xem người dùng có tồn tại trong hệ thống không
+    let user_exists = sqlx::query("SELECT id FROM findora.users WHERE email = $1")
+        .bind(&email)
+        .fetch_optional(&*state.pool)
+        .await
+        .map_err(AppError::Database)?;
+
+    if user_exists.is_none() {
+        warn!(email = %email, "Yêu cầu quên mật khẩu cho email không tồn tại");
+        // Giả lập thành công để tránh tấn công user enumeration
+        return Ok(Json(ForgotPasswordResponse {
+            success: true,
+            message: i18n::msg_forgot_password_sent(lang).to_string(),
+            reset_code: None,
+        }));
+    }
+
+    // Rate limiting: Tối đa 5 lần yêu cầu mã trong vòng 15 phút
+    let recent_count: i64 = sqlx::query(
+        "SELECT COUNT(*) FROM findora.password_resets 
+         WHERE email = $1 AND created_at > NOW() - INTERVAL '15 minutes'"
+    )
+    .bind(&email)
+    .fetch_one(&*state.pool)
+    .await
+    .map_err(AppError::Database)?
+    .get(0);
+
+    if recent_count >= 5 {
+        warn!(email = %email, "Quá nhiều yêu cầu quên mật khẩu trong 15 phút");
+        return Err(AppError::TooManyRequests(
+            i18n::msg_too_many_reset_requests(lang).to_string(),
+        ));
+    }
+
+    // Sinh mã xác thực 6 số ngẫu nhiên CSPRNG
+    let random_bytes = Uuid::new_v4().as_bytes()[0..4].try_into().unwrap();
+    let code_num = (u32::from_le_bytes(random_bytes) % 900_000) + 100_000;
+    let code = format!("{:06}", code_num);
+
+    let reset_id = format!("rst_{}", Uuid::new_v4().simple());
+    let vn_offset = chrono::FixedOffset::east_opt(7 * 3600).unwrap();
+    let expires_at = (chrono::Utc::now() + chrono::Duration::minutes(15)).with_timezone(&vn_offset);
+
+    sqlx::query(
+        "INSERT INTO findora.password_resets (id, email, code, expires_at, created_at)
+         VALUES ($1, $2, $3, $4, NOW())"
+    )
+    .bind(&reset_id)
+    .bind(&email)
+    .bind(&code)
+    .bind(expires_at)
+    .execute(&*state.pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    info!(
+        email = %email,
+        code = %code,
+        expires_at = %expires_at,
+        "🔑 Đã phát hành mã xác thực quên mật khẩu 6 số (hết hạn trong 15 phút)"
+    );
+
+    // Ở môi trường demo/development trả về reset_code để tiện tích hợp và kiểm thử
+    let debug_code = if state.config.env != "production_strict" {
+        Some(code)
+    } else {
+        None
+    };
+
+    Ok(Json(ForgotPasswordResponse {
+        success: true,
+        message: i18n::msg_forgot_password_sent(lang).to_string(),
+        reset_code: debug_code,
+    }))
+}
+
+/// 5. Đặt lại mật khẩu mới bằng mã xác nhận (POST /api/auth/reset-password)
+pub async fn reset_password_handler(
+    State(state): State<Arc<AppState>>,
+    lang: Language,
+    Json(payload): Json<ResetPasswordRequest>,
+) -> AppResult<Json<AuthResponse>> {
+    let email = payload.email.trim().to_lowercase();
+    let code = payload.code.trim();
+
+    if let Some(ref confirm) = payload.confirm_password {
+        if &payload.new_password != confirm {
+            return Err(AppError::BadRequest(i18n::msg_password_mismatch(lang).into()));
+        }
+    }
+
+    // 1. Kiểm tra chính sách mật khẩu mạnh (ít nhất 8 ký tự, có số, ký tự đặc biệt)
+    validate_password(&payload.new_password, lang)?;
+
+    // 2. Kiểm tra mã xác thực trong database (chưa dùng và chưa hết hạn)
+    let record = sqlx::query(
+        "SELECT id, code, expires_at 
+         FROM findora.password_resets 
+         WHERE email = $1 AND used_at IS NULL AND expires_at > NOW() 
+         ORDER BY created_at DESC LIMIT 1"
+    )
+    .bind(&email)
+    .fetch_optional(&*state.pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    let reset_row = match record {
+        Some(r) => r,
+        None => {
+            return Err(AppError::BadRequest(
+                i18n::msg_invalid_or_expired_code(lang).into(),
+            ));
+        }
+    };
+
+    let stored_code: String = reset_row.get("code");
+    let reset_id: String = reset_row.get("id");
+
+    if stored_code != code {
+        warn!(email = %email, input_code = %code, "Mã xác thực không trùng khớp");
+        return Err(AppError::BadRequest(
+            i18n::msg_invalid_or_expired_code(lang).into(),
+        ));
+    }
+
+    // 3. Hash mật khẩu mới bằng bcrypt
+    let hashed_pw = hash(&payload.new_password, DEFAULT_COST)
+        .map_err(|e| AppError::Internal(format!("Lỗi mã hóa mật khẩu: {}", e)))?;
+
+    let mut tx = state.pool.begin().await.map_err(AppError::Database)?;
+
+    // 4. Cập nhật mật khẩu mới & Mở khóa tài khoản (reset rate limit attempts)
+    let user_row = sqlx::query(
+        "UPDATE findora.users 
+         SET password_hash = $1, 
+             failed_login_attempts = 0, 
+             locked_until = NULL, 
+             last_failed_at = NULL, 
+             updated_at = NOW() 
+         WHERE email = $2 
+         RETURNING id, full_name, phone_number"
+    )
+    .bind(&hashed_pw)
+    .bind(&email)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(AppError::Database)?;
+
+    let user = match user_row {
+        Some(u) => u,
+        None => {
+            return Err(AppError::NotFound(i18n::msg_user_not_found(lang).into()));
+        }
+    };
+
+    // Đánh dấu mã đã sử dụng (chống Replay Attack)
+    sqlx::query("UPDATE findora.password_resets SET used_at = NOW() WHERE id = $1")
+        .bind(&reset_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(AppError::Database)?;
+
+    tx.commit().await.map_err(AppError::Database)?;
+
+    let user_id: String = user.get("id");
+    let full_name: String = user.get("full_name");
+    let phone_number: String = user.get("phone_number");
+
+    // Cấp ngay JWT token để người dùng đăng nhập ngay lập tức
+    let token = create_jwt(&user_id, &email, &state.config.jwt_secret, 30)?;
+
+    info!(user_id = %user_id, email = %email, "🎉 Đặt lại mật khẩu thành công và tự động mở khóa tài khoản");
+
+    Ok(Json(AuthResponse {
+        success: true,
+        message: i18n::msg_reset_password_success(lang).to_string(),
+        token: Some(token),
+        user: Some(UserResponse {
+            id: user_id,
+            email,
+            full_name,
+            phone_number,
+        }),
+    }))
 }
 
