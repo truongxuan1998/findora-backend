@@ -401,6 +401,16 @@ pub async fn forgot_password_handler(
         "🔑 Đã phát hành mã xác thực quên mật khẩu 6 số (hết hạn trong 15 phút, lưu an toàn trong database)"
     );
 
+    // Gửi email chứa mã OTP qua Brevo Service trong background task (non-blocking)
+    let email_service = state.email.clone();
+    let recipient_email = email.clone();
+    let otp_code = code.clone();
+    tokio::spawn(async move {
+        if let Err(e) = email_service.send_reset_password_otp(&recipient_email, &otp_code, lang).await {
+            tracing::error!(email = %recipient_email, error = %e, "Lỗi khi gửi email OTP qua Brevo");
+        }
+    });
+
     // Chuẩn Production: Tuyệt đối không bao giờ trả reset_code qua API response
     Ok(Json(ForgotPasswordResponse {
         success: true,

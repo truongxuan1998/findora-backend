@@ -12,6 +12,9 @@ pub struct Config {
     pub redis_url: Option<String>,
     pub upstash_redis_rest_url: Option<String>,
     pub upstash_redis_rest_token: Option<String>,
+    pub brevo_api_key: Option<String>,
+    pub brevo_sender_email: String,
+    pub brevo_sender_name: String,
 }
 
 impl Config {
@@ -53,6 +56,16 @@ impl Config {
             .ok()
             .filter(|s| !s.trim().is_empty());
 
+        let brevo_api_key = env::var("BREVO_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty());
+
+        let brevo_sender_email = env::var("BREVO_SENDER_EMAIL")
+            .unwrap_or_else(|_| "security@findora.app".to_string());
+
+        let brevo_sender_name = env::var("BREVO_SENDER_NAME")
+            .unwrap_or_else(|_| "Findora Security".to_string());
+
         Ok(Self {
             database_url,
             port,
@@ -64,6 +77,9 @@ impl Config {
             redis_url,
             upstash_redis_rest_url,
             upstash_redis_rest_token,
+            brevo_api_key,
+            brevo_sender_email,
+            brevo_sender_name,
         })
     }
 }

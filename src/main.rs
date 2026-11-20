@@ -45,10 +45,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await,
     );
 
+    // Khởi tạo Brevo Email Service
+    let email_service = Arc::new(findora_backend::email::EmailService::new(
+        config.brevo_api_key.clone(),
+        config.brevo_sender_email.clone(),
+        config.brevo_sender_name.clone(),
+    ));
+
     let state = Arc::new(AppState {
         pool: Arc::new(pool),
         config: config.clone(),
         redis: redis_service,
+        email: email_service,
     });
 
     let cors = CorsLayer::new()
