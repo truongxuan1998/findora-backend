@@ -62,7 +62,21 @@ async fn test_forgot_and_reset_password_workflow() {
         .await
         .expect("Yêu cầu quên mật khẩu phải thành công");
 
-    let code = forgot_res.0.reset_code.expect("Code phải được trả về trong test environment");
+    // Chuẩn Production: API response tuyệt đối KHÔNG chứa reset_code
+    assert!(
+        forgot_res.0.reset_code.is_none(),
+        "Production API response không được tiết lộ mã xác thực"
+    );
+
+    // Lấy mã xác thực được lưu bảo mật trong database (mô phỏng người dùng nhận qua email)
+    let record: (String,) = sqlx::query_as(
+        "SELECT code FROM findora.password_resets WHERE email = $1 ORDER BY created_at DESC LIMIT 1"
+    )
+    .bind(test_email)
+    .fetch_one(&pool)
+    .await
+    .expect("Mã xác thực phải được lưu trong database");
+    let code = record.0;
     assert_eq!(code.len(), 6, "Mã xác thực phải gồm đúng 6 chữ số");
 
     // 3. Đặt lại mật khẩu với mã SAI -> Phải bị từ chối

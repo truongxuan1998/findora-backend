@@ -397,22 +397,15 @@ pub async fn forgot_password_handler(
 
     info!(
         email = %email,
-        code = %code,
         expires_at = %expires_at,
-        "🔑 Đã phát hành mã xác thực quên mật khẩu 6 số (hết hạn trong 15 phút)"
+        "🔑 Đã phát hành mã xác thực quên mật khẩu 6 số (hết hạn trong 15 phút, lưu an toàn trong database)"
     );
 
-    // Ở môi trường demo/development trả về reset_code để tiện tích hợp và kiểm thử
-    let debug_code = if state.config.env != "production_strict" {
-        Some(code)
-    } else {
-        None
-    };
-
+    // Chuẩn Production: Tuyệt đối không bao giờ trả reset_code qua API response
     Ok(Json(ForgotPasswordResponse {
         success: true,
         message: i18n::msg_forgot_password_sent(lang).to_string(),
-        reset_code: debug_code,
+        reset_code: None,
     }))
 }
 
