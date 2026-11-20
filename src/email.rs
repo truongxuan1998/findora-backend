@@ -7,9 +7,19 @@ use tracing::{error, info, warn};
 #[derive(Clone, Debug)]
 pub struct EmailService {
     client: Client,
-    api_key: Option<String>,
-    sender_email: String,
-    sender_name: String,
+    resend_api_key: Option<String>,
+    resend_from: String,
+    brevo_api_key: Option<String>,
+    brevo_sender_email: String,
+    brevo_sender_name: String,
+}
+
+#[derive(Serialize)]
+struct ResendSendEmailRequest<'a> {
+    from: &'a str,
+    to: Vec<&'a str>,
+    subject: &'a str,
+    html: String,
 }
 
 #[derive(Serialize)]
@@ -33,7 +43,13 @@ struct BrevoSendEmailRequest<'a> {
 }
 
 impl EmailService {
-    pub fn new(api_key: Option<String>, sender_email: String, sender_name: String) -> Self {
+    pub fn new(
+        resend_api_key: Option<String>,
+        resend_from: String,
+        brevo_api_key: Option<String>,
+        brevo_sender_email: String,
+        brevo_sender_name: String,
+    ) -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(10))
             .build()
@@ -41,38 +57,31 @@ impl EmailService {
 
         Self {
             client,
-            api_key,
-            sender_email,
-            sender_name,
+            resend_api_key,
+            resend_from,
+            brevo_api_key,
+            brevo_sender_email,
+            brevo_sender_name,
         }
     }
 
     pub fn disabled() -> Self {
         Self::new(
             None,
+            "Findora Security <onboarding@resend.dev>".to_string(),
+            None,
             "no-reply@findora.app".to_string(),
             "Findora Security".to_string(),
         )
     }
 
-    /// Gửi email chứa mã OTP xác thực 6 số qua Brevo Transactional Email API (v3)
+    /// Gửi email chứa mã OTP xác thực 6 số (Ưu tiên Resend, tự động fallback sang Brevo nếu lỗi)
     pub async fn send_reset_password_otp(
         &self,
         recipient_email: &str,
         code: &str,
         lang: Language,
     ) -> Result<(), String> {
-        let api_key = match &self.api_key {
-            Some(key) if !key.trim().is_empty() => key.trim(),
-            _ => {
-                warn!(
-                    recipient = %recipient_email,
-                    "⚠️ BREVO_API_KEY chưa được cấu hình. Bỏ qua bước gửi email thực tế (mã OTP vẫn được lưu bảo mật trong DB)."
-                );
-                return Ok(());
-            }
-        };
-
         let subject = match lang {
             Language::Vi => "Mã xác thực đặt lại mật khẩu - Findora",
             Language::En => "Password Reset Verification Code - Findora",
@@ -80,10 +89,100 @@ impl EmailService {
 
         let html_content = generate_otp_email_html(code, lang);
 
+        // 1. Thử gửi qua Resend nếu có cấu hình RESEND_API_KEY
+        if let Some(resend_key) = &self.resend_api_key {
+            if !resend_key.trim().is_empty() {
+                match self.send_via_resend(resend_key.trim(), recipient_email, subject, html_content.clone()).await {
+                    Ok(()) => return Ok(()),
+                    Err(e) => {
+                        warn!(
+                            recipient = %recipient_email,
+                            error = %e,
+                            "⚠️ Gửi email qua Resend không thành công, kiểm tra kênh fallback Brevo..."
+                        );
+                    }
+                }
+            }
+        }
+
+        // 2. Fallback hoặc gửi qua Brevo nếu có cấu hình BREVO_API_KEY
+        if let Some(brevo_key) = &self.brevo_api_key {
+            if !brevo_key.trim().is_empty() {
+                return self.send_via_brevo(brevo_key.trim(), recipient_email, subject, html_content).await;
+            }
+        }
+
+        // Nếu không có API key nào hoặc cả hai đều không gửi được
+        if self.resend_api_key.is_none() && self.brevo_api_key.is_none() {
+            warn!(
+                recipient = %recipient_email,
+                "⚠️ Chưa cấu hình RESEND_API_KEY hoặc BREVO_API_KEY. Bỏ qua bước gửi email thực tế (mã OTP vẫn được lưu bảo mật trong DB)."
+            );
+            Ok(())
+        } else {
+            Err("Không thể gửi email OTP qua các nhà cung cấp đã cấu hình".to_string())
+        }
+    }
+
+    async fn send_via_resend(
+        &self,
+        api_key: &str,
+        recipient_email: &str,
+        subject: &str,
+        html_content: String,
+    ) -> Result<(), String> {
+        let payload = ResendSendEmailRequest {
+            from: &self.resend_from,
+            to: vec![recipient_email],
+            subject,
+            html: html_content,
+        };
+
+        let res = self
+            .client
+            .post("https://api.resend.com/emails")
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| format!("Lỗi kết nối tới máy chủ Resend: {}", e))?;
+
+        let status = res.status();
+        let body = res
+            .text()
+            .await
+            .unwrap_or_else(|_| "Không thể đọc nội dung phản hồi".to_string());
+
+        if status.is_success() {
+            info!(
+                recipient = %recipient_email,
+                "✅ Đã gửi email mã xác thực OTP 6 số qua Resend thành công! Response: {}",
+                body
+            );
+            Ok(())
+        } else {
+            error!(
+                status = %status,
+                body = %body,
+                recipient = %recipient_email,
+                "❌ Gửi email qua Resend thất bại"
+            );
+            Err(format!("Resend API lỗi (HTTP {}): {}", status, body))
+        }
+    }
+
+    async fn send_via_brevo(
+        &self,
+        api_key: &str,
+        recipient_email: &str,
+        subject: &str,
+        html_content: String,
+    ) -> Result<(), String> {
         let payload = BrevoSendEmailRequest {
             sender: BrevoSender {
-                name: &self.sender_name,
-                email: &self.sender_email,
+                name: &self.brevo_sender_name,
+                email: &self.brevo_sender_email,
             },
             to: vec![BrevoRecipient {
                 email: recipient_email,

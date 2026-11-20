@@ -12,6 +12,8 @@ pub struct Config {
     pub redis_url: Option<String>,
     pub upstash_redis_rest_url: Option<String>,
     pub upstash_redis_rest_token: Option<String>,
+    pub resend_api_key: Option<String>,
+    pub resend_from: String,
     pub brevo_api_key: Option<String>,
     pub brevo_sender_email: String,
     pub brevo_sender_name: String,
@@ -56,6 +58,13 @@ impl Config {
             .ok()
             .filter(|s| !s.trim().is_empty());
 
+        let resend_api_key = env::var("RESEND_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty());
+
+        let resend_from = env::var("RESEND_FROM")
+            .unwrap_or_else(|_| "Findora Security <onboarding@resend.dev>".to_string());
+
         let brevo_api_key = env::var("BREVO_API_KEY")
             .ok()
             .filter(|s| !s.trim().is_empty());
@@ -77,6 +86,8 @@ impl Config {
             redis_url,
             upstash_redis_rest_url,
             upstash_redis_rest_token,
+            resend_api_key,
+            resend_from,
             brevo_api_key,
             brevo_sender_email,
             brevo_sender_name,

@@ -45,8 +45,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await,
     );
 
-    // Khởi tạo Brevo Email Service
+    // Khởi tạo Email Service (Hỗ trợ Resend & Brevo Dual-Provider)
     let email_service = Arc::new(findora_backend::email::EmailService::new(
+        config.resend_api_key.clone(),
+        config.resend_from.clone(),
         config.brevo_api_key.clone(),
         config.brevo_sender_email.clone(),
         config.brevo_sender_name.clone(),
