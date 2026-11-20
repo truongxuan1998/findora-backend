@@ -1,5 +1,6 @@
 use crate::auth::AuthenticatedUser;
 use crate::errors::{AppError, AppResult};
+use crate::i18n::{self, Language};
 use crate::image_validator::{validate_image, MAX_IMAGE_SIZE};
 use crate::storage::SupabaseStorage;
 use crate::AppState;
@@ -38,13 +39,9 @@ pub struct UserProfileResponse {
 }
 
 /// Upload ảnh avatar thông qua Multipart Form-Data
-/// Quy trình:
-/// 1. Nhận binary stream từ multipart form-data (giới hạn tối đa 3MB).
-/// 2. Backend kiểm tra Magic Bytes (JPEG/PNG/WEBP), kích thước và chữ ký mã độc.
-/// 3. Upload ảnh đã xác thực lên bucket của Supabase Storage.
-/// 4. Cập nhật URL ảnh vào bảng `findora.users`.
 pub async fn upload_avatar_handler(
     State(state): State<Arc<AppState>>,
+    lang: Language,
     auth: AuthenticatedUser,
     mut multipart: Multipart,
 ) -> AppResult<(StatusCode, Json<AvatarUploadResponse>)> {
@@ -97,7 +94,7 @@ pub async fn upload_avatar_handler(
         StatusCode::OK,
         Json(AvatarUploadResponse {
             success: true,
-            message: "Cập nhật ảnh đại diện thành công".to_string(),
+            message: i18n::msg_avatar_upload_success(lang).to_string(),
             avatar_url,
         }),
     ))
@@ -105,6 +102,7 @@ pub async fn upload_avatar_handler(
 
 pub async fn get_profile_handler(
     State(state): State<Arc<AppState>>,
+    lang: Language,
     auth: AuthenticatedUser,
 ) -> AppResult<Json<UserProfileResponse>> {
     let row = sqlx::query(
@@ -116,7 +114,7 @@ pub async fn get_profile_handler(
     .fetch_optional(&*state.pool)
     .await
     .map_err(AppError::Database)?
-    .ok_or_else(|| AppError::NotFound("Không tìm thấy người dùng".into()))?;
+    .ok_or_else(|| AppError::NotFound(i18n::msg_user_not_found(lang).into()))?;
 
     Ok(Json(UserProfileResponse {
         id: row.get("id"),
@@ -129,12 +127,13 @@ pub async fn get_profile_handler(
 
 pub async fn update_profile_handler(
     State(state): State<Arc<AppState>>,
+    lang: Language,
     auth: AuthenticatedUser,
     Json(payload): Json<UpdateProfileRequest>,
 ) -> AppResult<Json<UserProfileResponse>> {
     if let Some(ref name) = payload.full_name {
         if name.trim().is_empty() {
-            return Err(AppError::BadRequest("Họ và tên không được để trống".into()));
+            return Err(AppError::BadRequest(i18n::msg_empty_name(lang).into()));
         }
     }
 

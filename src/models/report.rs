@@ -13,6 +13,8 @@ pub struct CategorySummary {
     pub category_id: String,
     #[serde(rename = "categoryName")]
     pub category_name: String,
+    #[serde(rename = "categoryNameEn", skip_serializing_if = "Option::is_none")]
+    pub category_name_en: Option<String>,
     #[serde(rename = "totalAmount")]
     pub total_amount: i64,
     pub percentage: f64,

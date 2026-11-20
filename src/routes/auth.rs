@@ -1,5 +1,6 @@
 use crate::auth::{create_jwt, AuthenticatedUser};
 use crate::errors::{AppError, AppResult};
+use crate::i18n::{self, Language};
 use crate::models::user::{AuthResponse, LoginRequest, RegisterRequest, UserResponse};
 use crate::AppState;
 use axum::{extract::State, http::StatusCode, Json};
@@ -10,24 +11,24 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 /// Kiểm tra độ phức tạp của mật khẩu: ít nhất 8 ký tự, có số, có ký tự đặc biệt, không quá 72 ký tự
-pub fn validate_password(password: &str) -> AppResult<()> {
+pub fn validate_password(password: &str, lang: Language) -> AppResult<()> {
     if password.len() < 8 {
-        return Err(AppError::BadRequest("Mật khẩu phải chứa ít nhất 8 ký tự".into()));
+        return Err(AppError::BadRequest(i18n::msg_password_min_length(lang).into()));
     }
 
     if password.len() > 72 {
-        return Err(AppError::BadRequest("Mật khẩu không được vượt quá 72 ký tự".into()));
+        return Err(AppError::BadRequest(i18n::msg_password_max_length(lang).into()));
     }
 
     let has_digit = password.chars().any(|c| c.is_ascii_digit());
     let has_special = password.chars().any(|c| !c.is_alphanumeric());
 
     if !has_digit {
-        return Err(AppError::BadRequest("Mật khẩu phải chứa ít nhất một chữ số (0-9)".into()));
+        return Err(AppError::BadRequest(i18n::msg_password_need_digit(lang).into()));
     }
 
     if !has_special {
-        return Err(AppError::BadRequest("Mật khẩu phải chứa ít nhất một ký tự đặc biệt (!@#$%^&*...)".into()));
+        return Err(AppError::BadRequest(i18n::msg_password_need_special(lang).into()));
     }
 
     Ok(())
@@ -35,20 +36,21 @@ pub fn validate_password(password: &str) -> AppResult<()> {
 
 pub async fn register_handler(
     State(state): State<Arc<AppState>>,
+    lang: Language,
     Json(payload): Json<RegisterRequest>,
 ) -> AppResult<(StatusCode, Json<AuthResponse>)> {
     let email = payload.email.trim().to_lowercase();
     let name = payload.full_name.trim();
 
     if email.is_empty() || !email.contains('@') {
-        return Err(AppError::BadRequest("Email không đúng định dạng".into()));
+        return Err(AppError::BadRequest(i18n::msg_invalid_email(lang).into()));
     }
 
     if name.is_empty() {
-        return Err(AppError::BadRequest("Họ và tên không được để trống".into()));
+        return Err(AppError::BadRequest(i18n::msg_empty_name(lang).into()));
     }
 
-    validate_password(&payload.password)?;
+    validate_password(&payload.password, lang)?;
 
     let hashed_pw = hash(&payload.password, DEFAULT_COST)
         .map_err(|e| AppError::Internal(format!("Lỗi mã hóa mật khẩu: {}", e)))?;
@@ -75,27 +77,30 @@ pub async fn register_handler(
     if let Err(e) = insert_res {
         if let sqlx::Error::Database(ref db_err) = e {
             if db_err.code().as_deref() == Some("23505") {
-                return Err(AppError::Conflict("Email này đã được đăng ký tài khoản Findora".into()));
+                return Err(AppError::Conflict(i18n::msg_email_exists(lang).into()));
             }
         }
         return Err(AppError::Database(e));
     }
 
-    // 2. Tạo ví mặc định liên kết chính xác với user_id mới tạo (Data Integrity)
+    // 2. Tạo ví mặc định liên kết chính xác với user_id mới tạo (Tên ví bản địa hóa theo ngôn ngữ)
     let wallet_id = format!("wal_{}", Uuid::new_v4().simple());
+    let default_wallet_title = i18n::msg_default_wallet_name(lang);
+
     sqlx::query(
         "INSERT INTO findora.wallets (id, user_id, name, currency, initial_balance, current_balance)
-         VALUES ($1, $2, 'Ví tiền mặt', 'VND', 0, 0)"
+         VALUES ($1, $2, $3, 'VND', 0, 0)"
     )
     .bind(&wallet_id)
     .bind(&user_id)
+    .bind(default_wallet_title)
     .execute(&mut *tx)
     .await
     .map_err(AppError::Database)?;
 
     tx.commit().await.map_err(AppError::Database)?;
 
-    info!(user_id = %user_id, email = %email, "🎉 Đăng ký tài khoản và khởi tạo ví thành công");
+    info!(user_id = %user_id, email = %email, lang = %lang.code(), "🎉 Đăng ký tài khoản và khởi tạo ví thành công");
 
     // Tạo token JWT có thời hạn 30 ngày
     let token = create_jwt(&user_id, &email, &state.config.jwt_secret, 30)?;
@@ -104,7 +109,7 @@ pub async fn register_handler(
         StatusCode::CREATED,
         Json(AuthResponse {
             success: true,
-            message: "Đăng ký tài khoản thành công!".to_string(),
+            message: i18n::msg_register_success(lang).to_string(),
             token: Some(token),
             user: Some(UserResponse {
                 id: user_id,
@@ -118,6 +123,7 @@ pub async fn register_handler(
 
 pub async fn login_handler(
     State(state): State<Arc<AppState>>,
+    lang: Language,
     Json(payload): Json<LoginRequest>,
 ) -> AppResult<Json<AuthResponse>> {
     let email = payload.email.trim().to_lowercase();
@@ -137,7 +143,7 @@ pub async fn login_handler(
         None => {
             warn!(email = %email, "Đăng nhập thất bại: Tài khoản không tồn tại");
             // Tránh user enumeration attack: trả về thông điệp chung
-            return Err(AppError::Unauthorized("Email hoặc mật khẩu không chính xác".into()));
+            return Err(AppError::Unauthorized(i18n::msg_invalid_credentials(lang).into()));
         }
     };
 
@@ -146,20 +152,20 @@ pub async fn login_handler(
 
     if !is_valid {
         warn!(email = %email, "Đăng nhập thất bại: Sai mật khẩu");
-        return Err(AppError::Unauthorized("Email hoặc mật khẩu không chính xác".into()));
+        return Err(AppError::Unauthorized(i18n::msg_invalid_credentials(lang).into()));
     }
 
     let user_id: String = row.get("id");
     let full_name: String = row.get("full_name");
     let phone_number: String = row.get("phone_number");
 
-    info!(user_id = %user_id, email = %email, "🔐 Đăng nhập thành công, đang cấp JWT token");
+    info!(user_id = %user_id, email = %email, lang = %lang.code(), "🔐 Đăng nhập thành công, đang cấp JWT token");
 
     let token = create_jwt(&user_id, &email, &state.config.jwt_secret, 30)?;
 
     Ok(Json(AuthResponse {
         success: true,
-        message: "Đăng nhập thành công".to_string(),
+        message: i18n::msg_login_success(lang).to_string(),
         token: Some(token),
         user: Some(UserResponse {
             id: user_id,
@@ -172,6 +178,7 @@ pub async fn login_handler(
 
 pub async fn me_handler(
     State(state): State<Arc<AppState>>,
+    lang: Language,
     auth: AuthenticatedUser,
 ) -> AppResult<Json<UserResponse>> {
     let row = sqlx::query(
@@ -183,7 +190,7 @@ pub async fn me_handler(
     .fetch_optional(&*state.pool)
     .await
     .map_err(AppError::Database)?
-    .ok_or_else(|| AppError::NotFound("Người dùng không tồn tại".into()))?;
+    .ok_or_else(|| AppError::NotFound(i18n::msg_user_not_found(lang).into()))?;
 
     Ok(Json(UserResponse {
         id: row.get("id"),
@@ -194,13 +201,14 @@ pub async fn me_handler(
 }
 
 pub async fn logout_handler(
+    lang: Language,
     auth: AuthenticatedUser,
 ) -> AppResult<Json<serde_json::Value>> {
     info!(user_id = %auth.user_id, email = %auth.email, "🚪 [USER LOGOUT] Người dùng đã đăng xuất an toàn khỏi thiết bị");
 
     Ok(Json(serde_json::json!({
         "success": true,
-        "message": "Đăng xuất tài khoản thành công"
+        "message": i18n::msg_logout_success(lang)
     })))
 }
 
@@ -210,36 +218,48 @@ mod tests {
 
     #[test]
     fn test_password_valid() {
-        assert!(validate_password("Password123!").is_ok());
-        assert!(validate_password("Secure@2026").is_ok());
-        assert!(validate_password("Abc#1234").is_ok());
+        assert!(validate_password("Password123!", Language::Vi).is_ok());
+        assert!(validate_password("Secure@2026", Language::En).is_ok());
+        assert!(validate_password("Abc#1234", Language::Vi).is_ok());
     }
 
     #[test]
     fn test_password_too_short() {
-        let res = validate_password("Abc1!");
+        let res = validate_password("Abc1!", Language::Vi);
         assert!(res.is_err());
         assert!(matches!(res.unwrap_err(), AppError::BadRequest(msg) if msg.contains("ít nhất 8 ký tự")));
+
+        let res_en = validate_password("Abc1!", Language::En);
+        assert!(res_en.is_err());
+        assert!(matches!(res_en.unwrap_err(), AppError::BadRequest(msg) if msg.contains("at least 8 characters")));
     }
 
     #[test]
     fn test_password_no_digit() {
-        let res = validate_password("Password!@#");
+        let res = validate_password("Password!@#", Language::Vi);
         assert!(res.is_err());
         assert!(matches!(res.unwrap_err(), AppError::BadRequest(msg) if msg.contains("chữ số")));
+
+        let res_en = validate_password("Password!@#", Language::En);
+        assert!(res_en.is_err());
+        assert!(matches!(res_en.unwrap_err(), AppError::BadRequest(msg) if msg.contains("digit")));
     }
 
     #[test]
     fn test_password_no_special() {
-        let res = validate_password("Password123");
+        let res = validate_password("Password123", Language::Vi);
         assert!(res.is_err());
         assert!(matches!(res.unwrap_err(), AppError::BadRequest(msg) if msg.contains("ký tự đặc biệt")));
+
+        let res_en = validate_password("Password123", Language::En);
+        assert!(res_en.is_err());
+        assert!(matches!(res_en.unwrap_err(), AppError::BadRequest(msg) if msg.contains("special character")));
     }
 
     #[test]
     fn test_password_too_long() {
         let long_pw = "A1!".repeat(25); // 75 chars
-        let res = validate_password(&long_pw);
+        let res = validate_password(&long_pw, Language::Vi);
         assert!(res.is_err());
         assert!(matches!(res.unwrap_err(), AppError::BadRequest(msg) if msg.contains("không được vượt quá 72 ký tự")));
     }

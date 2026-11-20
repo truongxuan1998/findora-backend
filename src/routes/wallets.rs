@@ -1,5 +1,6 @@
 use crate::auth::AuthenticatedUser;
 use crate::errors::{AppError, AppResult};
+use crate::i18n::{self, Language};
 use crate::models::wallet::{CreateWalletRequest, WalletItem};
 use crate::AppState;
 use axum::{extract::State, http::StatusCode, Json};
@@ -41,12 +42,13 @@ pub async fn list_wallets_handler(
 
 pub async fn create_wallet_handler(
     State(state): State<Arc<AppState>>,
+    lang: Language,
     auth: AuthenticatedUser,
     Json(payload): Json<CreateWalletRequest>,
 ) -> AppResult<(StatusCode, Json<WalletItem>)> {
     let name = payload.name.trim();
     if name.is_empty() {
-        return Err(AppError::BadRequest("Tên ví không được để trống".into()));
+        return Err(AppError::BadRequest(i18n::msg_empty_wallet_name(lang).into()));
     }
 
     let wallet_id = format!("wal_{}", Uuid::new_v4().simple());

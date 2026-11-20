@@ -1,5 +1,6 @@
 use crate::auth::AuthenticatedUser;
 use crate::errors::{AppError, AppResult};
+use crate::i18n::{self, Language};
 use crate::models::transaction::{CreateTransactionRequest, TransactionItem, TransactionQuery};
 use crate::AppState;
 use axum::{
@@ -64,16 +65,17 @@ pub async fn list_transactions_handler(
 
 pub async fn create_transaction_handler(
     State(state): State<Arc<AppState>>,
+    lang: Language,
     auth: AuthenticatedUser,
     Json(payload): Json<CreateTransactionRequest>,
 ) -> AppResult<(StatusCode, Json<TransactionItem>)> {
     if payload.amount <= 0 {
-        return Err(AppError::BadRequest("Số tiền phải lớn hơn 0".into()));
+        return Err(AppError::BadRequest(i18n::msg_invalid_amount(lang).into()));
     }
 
     let tx_type = payload.tx_type.to_uppercase();
     if !["EXPENSE", "INCOME", "TRANSFER"].contains(&tx_type.as_str()) {
-        return Err(AppError::BadRequest("Loại giao dịch không hợp lệ ('EXPENSE', 'INCOME', 'TRANSFER')".into()));
+        return Err(AppError::BadRequest(i18n::msg_invalid_tx_type(lang).into()));
     }
 
     let mut tx = state.pool.begin().await.map_err(AppError::Database)?;
@@ -89,7 +91,7 @@ pub async fn create_transaction_handler(
                 .map_err(AppError::Database)?;
 
             if exists.is_none() {
-                return Err(AppError::NotFound("Ví không tồn tại hoặc không thuộc quyền sở hữu của bạn".into()));
+                return Err(AppError::NotFound(i18n::msg_wallet_not_found(lang).into()));
             }
             wid
         }
@@ -103,7 +105,7 @@ pub async fn create_transaction_handler(
 
             match first_wallet {
                 Some(w) => w.get("id"),
-                None => return Err(AppError::BadRequest("Bạn chưa có ví tài chính nào. Hãy tạo ví trước.".into())),
+                None => return Err(AppError::BadRequest(i18n::msg_no_wallet_available(lang).into())),
             }
         }
     };

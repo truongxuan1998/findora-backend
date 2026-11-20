@@ -3,6 +3,7 @@ mod auth;
 mod config;
 mod db;
 mod errors;
+mod i18n;
 mod image_validator;
 mod models;
 mod routes;

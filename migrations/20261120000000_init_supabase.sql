@@ -29,15 +29,17 @@ CREATE TABLE IF NOT EXISTS findora.users (
 );
 CREATE INDEX IF NOT EXISTS idx_users_email ON findora.users(email);
 
--- 2. Bảng Categories (Phân loại Chi tiêu & Nguồn thu nhập)
+-- 2. Bảng Categories (Phân loại Chi tiêu & Nguồn thu nhập - Hỗ trợ Song ngữ)
 CREATE TABLE IF NOT EXISTS findora.categories (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
+    name_en TEXT,
     icon TEXT NOT NULL,
     color TEXT NOT NULL,
     type TEXT NOT NULL CHECK (type IN ('EXPENSE', 'INCOME')),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+ALTER TABLE findora.categories ADD COLUMN IF NOT EXISTS name_en TEXT;
 
 -- 3. Bảng Wallets (Ví tài chính - Tham chiếu findora.users)
 CREATE TABLE IF NOT EXISTS findora.wallets (
@@ -94,20 +96,20 @@ CREATE INDEX IF NOT EXISTS idx_tx_category
 CREATE INDEX IF NOT EXISTS idx_tx_sync_version 
     ON findora.transactions(wallet_id, sync_version);
 
--- 6. Seed Danh mục mặc định (Chi tiêu & Nguồn thu nhập)
-INSERT INTO findora.categories (id, name, icon, color, type) VALUES
+-- 6. Seed Danh mục mặc định (Chi tiêu & Nguồn thu nhập - Song ngữ Anh/Việt)
+INSERT INTO findora.categories (id, name, name_en, icon, color, type) VALUES
     -- Phân loại Chi tiêu
-    ('cat_food', 'Ăn uống', 'fork.knife', '#FF5722', 'EXPENSE'),
-    ('cat_transport', 'Đi lại', 'car.fill', '#2196F3', 'EXPENSE'),
-    ('cat_shopping', 'Mua sắm', 'bag.fill', '#E91E63', 'EXPENSE'),
-    ('cat_bills', 'Hóa đơn & Tiện ích', 'doc.text.fill', '#FF9800', 'EXPENSE'),
-    ('cat_entertainment', 'Giải trí', 'gamecontroller.fill', '#9C27B0', 'EXPENSE'),
+    ('cat_food', 'Ăn uống', 'Food & Dining', 'fork.knife', '#FF5722', 'EXPENSE'),
+    ('cat_transport', 'Đi lại', 'Transportation', 'car.fill', '#2196F3', 'EXPENSE'),
+    ('cat_shopping', 'Mua sắm', 'Shopping', 'bag.fill', '#E91E63', 'EXPENSE'),
+    ('cat_bills', 'Hóa đơn & Tiện ích', 'Bills & Utilities', 'doc.text.fill', '#FF9800', 'EXPENSE'),
+    ('cat_entertainment', 'Giải trí', 'Entertainment', 'gamecontroller.fill', '#9C27B0', 'EXPENSE'),
     -- Phân loại Nguồn thu nhập
-    ('cat_salary', 'Lương cố định', 'banknote.fill', '#4CAF50', 'INCOME'),
-    ('cat_freelance', 'Freelance & Dự án', 'laptopcomputer', '#009688', 'INCOME'),
-    ('cat_investment', 'Đầu tư & Cổ tức', 'chart.line.uptrend.xyaxis', '#3F51B5', 'INCOME'),
-    ('cat_bonus', 'Thưởng & Quà tặng', 'gift.fill', '#E91E63', 'INCOME')
-ON CONFLICT (id) DO NOTHING;
+    ('cat_salary', 'Lương cố định', 'Fixed Salary', 'banknote.fill', '#4CAF50', 'INCOME'),
+    ('cat_freelance', 'Freelance & Dự án', 'Freelance & Projects', 'laptopcomputer', '#009688', 'INCOME'),
+    ('cat_investment', 'Đầu tư & Cổ tức', 'Investments & Dividends', 'chart.line.uptrend.xyaxis', '#3F51B5', 'INCOME'),
+    ('cat_bonus', 'Thưởng & Quà tặng', 'Bonus & Gifts', 'gift.fill', '#E91E63', 'INCOME')
+ON CONFLICT (id) DO UPDATE SET name_en = EXCLUDED.name_en WHERE findora.categories.name_en IS NULL OR findora.categories.name_en = '';
 
 -- 7. Row Level Security (RLS) bảo vệ dữ liệu
 ALTER TABLE findora.categories ENABLE ROW LEVEL SECURITY;

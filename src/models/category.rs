@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 pub struct CategoryItem {
     pub id: String,
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name_en: Option<String>,
     pub icon: String,
     pub color: String,
     pub r#type: String, // 'EXPENSE' hoặc 'INCOME'

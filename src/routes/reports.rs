@@ -1,5 +1,6 @@
 use crate::auth::OptionalUser;
 use crate::errors::{AppError, AppResult};
+use crate::i18n::Language;
 use crate::models::report::{CategorySummary, MonthlyReportQuery, MonthlyReportResponse};
 use crate::AppState;
 use axum::{
@@ -12,6 +13,7 @@ use std::sync::Arc;
 
 pub async fn monthly_report_handler(
     State(state): State<Arc<AppState>>,
+    lang: Language,
     auth: OptionalUser,
     Query(query): Query<MonthlyReportQuery>,
 ) -> AppResult<Json<MonthlyReportResponse>> {
@@ -69,9 +71,9 @@ pub async fn monthly_report_handler(
         }
     }
 
-    // 2. Breakdown theo danh mục (Chi tiêu)
+    // 2. Breakdown theo danh mục (Chi tiêu - Hỗ trợ Song ngữ)
     let expense_rows = sqlx::query(
-        "SELECT c.id as cat_id, c.name as cat_name, COALESCE(SUM(t.amount), 0)::BIGINT as total_cat
+        "SELECT c.id as cat_id, c.name as cat_name, c.name_en as cat_name_en, COALESCE(SUM(t.amount), 0)::BIGINT as total_cat
          FROM findora.transactions t
          INNER JOIN findora.wallets w ON t.wallet_id = w.id
          INNER JOIN findora.categories c ON t.category_id = c.id
@@ -81,7 +83,7 @@ pub async fn monthly_report_handler(
            AND t.timestamp < $2
            AND ($3::TEXT IS NULL OR w.user_id = $3)
            AND ($4::TEXT IS NULL OR t.wallet_id = $4)
-         GROUP BY c.id, c.name
+         GROUP BY c.id, c.name, c.name_en
          ORDER BY total_cat DESC"
     )
     .bind(start_millis)
@@ -96,6 +98,14 @@ pub async fn monthly_report_handler(
         .into_iter()
         .map(|r| {
             let total: i64 = r.get("total_cat");
+            let name_vi: String = r.get("cat_name");
+            let name_en: Option<String> = r.get("cat_name_en");
+
+            let display_name = match lang {
+                Language::En => name_en.clone().unwrap_or_else(|| name_vi.clone()),
+                Language::Vi => name_vi,
+            };
+
             let percentage = if total_expense > 0 {
                 ((total as f64 / total_expense as f64) * 1000.0).round() / 10.0
             } else {
@@ -103,16 +113,17 @@ pub async fn monthly_report_handler(
             };
             CategorySummary {
                 category_id: r.get("cat_id"),
-                category_name: r.get("cat_name"),
+                category_name: display_name,
+                category_name_en: name_en,
                 total_amount: total,
                 percentage,
             }
         })
         .collect();
 
-    // 3. Breakdown theo danh mục (Thu nhập)
+    // 3. Breakdown theo danh mục (Thu nhập - Hỗ trợ Song ngữ)
     let income_rows = sqlx::query(
-        "SELECT c.id as cat_id, c.name as cat_name, COALESCE(SUM(t.amount), 0)::BIGINT as total_cat
+        "SELECT c.id as cat_id, c.name as cat_name, c.name_en as cat_name_en, COALESCE(SUM(t.amount), 0)::BIGINT as total_cat
          FROM findora.transactions t
          INNER JOIN findora.wallets w ON t.wallet_id = w.id
          INNER JOIN findora.categories c ON t.category_id = c.id
@@ -122,7 +133,7 @@ pub async fn monthly_report_handler(
            AND t.timestamp < $2
            AND ($3::TEXT IS NULL OR w.user_id = $3)
            AND ($4::TEXT IS NULL OR t.wallet_id = $4)
-         GROUP BY c.id, c.name
+         GROUP BY c.id, c.name, c.name_en
          ORDER BY total_cat DESC"
     )
     .bind(start_millis)
@@ -137,6 +148,14 @@ pub async fn monthly_report_handler(
         .into_iter()
         .map(|r| {
             let total: i64 = r.get("total_cat");
+            let name_vi: String = r.get("cat_name");
+            let name_en: Option<String> = r.get("cat_name_en");
+
+            let display_name = match lang {
+                Language::En => name_en.clone().unwrap_or_else(|| name_vi.clone()),
+                Language::Vi => name_vi,
+            };
+
             let percentage = if total_income > 0 {
                 ((total as f64 / total_income as f64) * 1000.0).round() / 10.0
             } else {
@@ -144,7 +163,8 @@ pub async fn monthly_report_handler(
             };
             CategorySummary {
                 category_id: r.get("cat_id"),
-                category_name: r.get("cat_name"),
+                category_name: display_name,
+                category_name_en: name_en,
                 total_amount: total,
                 percentage,
             }
