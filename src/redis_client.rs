@@ -216,50 +216,95 @@ impl RedisService {
     }
 
     /// Xóa toàn bộ key khớp với pattern (ví dụ: findora:cache:report:user_id:*)
+    /// Dùng SCAN (non-blocking, lặp theo cursor) thay cho KEYS để không block Redis server.
     pub async fn del_pattern(&self, pattern: &str) -> bool {
         if let Some(mut mgr) = self.manager.clone() {
-            let keys_res: Result<Vec<String>, _> = redis::cmd("KEYS").arg(pattern).query_async(&mut mgr).await;
-            if let Ok(keys) = keys_res {
-                if !keys.is_empty() {
-                    let _: Result<(), _> = redis::cmd("DEL").arg(&keys).query_async(&mut mgr).await;
+            let mut cursor: u64 = 0;
+            let mut all_keys: Vec<String> = Vec::new();
+            loop {
+                let res: Result<(u64, Vec<String>), _> = redis::cmd("SCAN")
+                    .arg(cursor)
+                    .arg("MATCH")
+                    .arg(pattern)
+                    .arg("COUNT")
+                    .arg(100)
+                    .query_async(&mut mgr)
+                    .await;
+                match res {
+                    Ok((next, keys)) => {
+                        all_keys.extend(keys);
+                        cursor = next;
+                        if cursor == 0 {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
                 }
-                return true;
             }
+            if !all_keys.is_empty() {
+                let _: Result<(), _> = redis::cmd("DEL").arg(&all_keys).query_async(&mut mgr).await;
+            }
+            return true;
         }
 
         if let (Some(url), Some(token)) = (&self.rest_url, &self.rest_token) {
-            let cmd = serde_json::json!(["KEYS", pattern]);
-            if let Ok(resp) = self
-                .http_client
-                .post(url)
-                .header("Authorization", format!("Bearer {}", token))
-                .header("Content-Type", "application/json")
-                .json(&cmd)
-                .send()
-                .await
-            {
-                if resp.status().is_success() {
-                    if let Ok(json) = resp.json::<Value>().await {
-                        if let Some(keys_val) = json.get("result").and_then(|v| v.as_array()) {
-                            let keys: Vec<String> = keys_val.iter().filter_map(|k| k.as_str().map(|s| s.to_string())).collect();
-                            if !keys.is_empty() {
-                                let mut del_cmd = vec![serde_json::json!("DEL")];
-                                for k in keys {
-                                    del_cmd.push(serde_json::json!(k));
-                                }
-                                let _ = self
-                                    .http_client
-                                    .post(url)
-                                    .header("Authorization", format!("Bearer {}", token))
-                                    .header("Content-Type", "application/json")
-                                    .json(&del_cmd)
-                                    .send()
-                                    .await;
-                            }
+            let mut cursor = "0".to_string();
+            let mut all_keys: Vec<String> = Vec::new();
+            loop {
+                let cmd = serde_json::json!(["SCAN", cursor, "MATCH", pattern, "COUNT", 100]);
+                let resp = match self
+                    .http_client
+                    .post(url)
+                    .header("Authorization", format!("Bearer {}", token))
+                    .header("Content-Type", "application/json")
+                    .json(&cmd)
+                    .send()
+                    .await
+                {
+                    Ok(r) if r.status().is_success() => r,
+                    _ => break,
+                };
+
+                let json = match resp.json::<Value>().await {
+                    Ok(j) => j,
+                    Err(_) => break,
+                };
+
+                // Upstash REST trả về: { "result": [ "<next_cursor>", [ "key1", "key2", ... ] ] }
+                let result = json.get("result").and_then(|v| v.as_array());
+                let Some(arr) = result else { break };
+                if arr.len() != 2 {
+                    break;
+                }
+                let next = arr[0].as_str().unwrap_or("0").to_string();
+                if let Some(keys) = arr[1].as_array() {
+                    for k in keys {
+                        if let Some(s) = k.as_str() {
+                            all_keys.push(s.to_string());
                         }
                     }
                 }
+                cursor = next;
+                if cursor == "0" {
+                    break;
+                }
             }
+
+            if !all_keys.is_empty() {
+                let mut del_cmd = vec![serde_json::json!("DEL")];
+                for k in all_keys {
+                    del_cmd.push(serde_json::json!(k));
+                }
+                let _ = self
+                    .http_client
+                    .post(url)
+                    .header("Authorization", format!("Bearer {}", token))
+                    .header("Content-Type", "application/json")
+                    .json(&del_cmd)
+                    .send()
+                    .await;
+            }
+            return true;
         }
 
         false

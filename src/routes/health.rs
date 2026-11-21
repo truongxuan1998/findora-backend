@@ -38,13 +38,17 @@ pub async fn health_handler(State(state): State<Arc<AppState>>) -> impl IntoResp
                 })),
             )
         }
-        Err(e) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({
-                "status": "error",
-                "database_error": e.to_string(),
-                "redis": redis_status
-            })),
-        ),
+        Err(e) => {
+            // Ghi chi tiết lỗi vào log nội bộ, KHÔNG lộ ra response public
+            tracing::error!("Health check thất bại khi truy vấn database: {}", e);
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({
+                    "status": "error",
+                    "database": "unavailable",
+                    "redis": redis_status
+                })),
+            )
+        }
     }
 }

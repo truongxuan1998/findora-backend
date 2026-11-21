@@ -31,15 +31,9 @@ pub async fn categories_handler(
             let name_vi: String = r.get("name");
             let name_en: Option<String> = r.get("name_en");
 
-            // Tự động chọn tên danh mục phù hợp theo ngôn ngữ của Client
-            let display_name = match lang {
-                Language::En => name_en.clone().unwrap_or_else(|| name_vi.clone()),
-                Language::Vi => name_vi.clone(),
-            };
-
             CategoryItem {
                 id: r.get("id"),
-                name: display_name,
+                name: name_vi,
                 name_en,
                 icon: r.get("icon"),
                 color: r.get("color"),

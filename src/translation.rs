@@ -317,19 +317,17 @@ impl TranslationService {
         trimmed.to_string()
     }
 
-    /// Dịch hàng loạt danh sách văn bản (tối ưu xử lý song song)
+    /// Dịch hàng loạt danh sách văn bản (xử lý song song, giữ nguyên thứ tự)
     pub async fn translate_batch(
         &self,
         texts: &[String],
         target: &str,
         source: Option<&str>,
     ) -> Vec<String> {
-        let mut results = Vec::with_capacity(texts.len());
-        for text in texts {
-            let res = self.translate(text, target, source).await;
-            results.push(res);
-        }
-        results
+        let futures_iter = texts
+            .iter()
+            .map(|text| self.translate(text, target, source));
+        futures::future::join_all(futures_iter).await
     }
 }
 

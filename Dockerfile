@@ -18,7 +18,6 @@ RUN mkdir -p src && \
 
 # Copy real application source code
 COPY src ./src
-COPY migrations ./migrations
 
 # Touch to trigger recompile of lib.rs and main.rs and build release binary
 RUN touch src/lib.rs src/main.rs && cargo build --release
@@ -35,6 +34,11 @@ RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/
 
 # Copy compiled binary from builder
 COPY --from=builder /usr/src/findora-backend/target/release/findora-backend /app/findora-backend
+
+# Hardening: chạy bằng user non-root thay vì root
+RUN groupadd --system findora && useradd --system --gid findora findora \
+    && chown -R findora:findora /app
+USER findora
 
 ENV PORT=10000
 ENV HOST=0.0.0.0

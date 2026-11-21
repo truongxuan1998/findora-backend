@@ -15,10 +15,12 @@ use uuid::Uuid;
 
 /// Kiểm tra độ phức tạp của mật khẩu: ít nhất 8 ký tự, có số, có ký tự đặc biệt, không quá 72 ký tự
 pub fn validate_password(password: &str, lang: Language) -> AppResult<()> {
-    if password.len() < 8 {
+    // Độ dài tối thiểu tính theo KÝ TỰ (hỗ trợ Unicode/tiếng Việt chính xác)
+    if password.chars().count() < 8 {
         return Err(AppError::BadRequest(i18n::msg_password_min_length(lang).into()));
     }
 
+    // Giới hạn tối đa tính theo BYTE để khớp với giới hạn 72 byte của bcrypt (tránh bị cắt ngầm)
     if password.len() > 72 {
         return Err(AppError::BadRequest(i18n::msg_password_max_length(lang).into()));
     }

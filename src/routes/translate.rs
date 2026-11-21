@@ -161,21 +161,25 @@ pub async fn translate_transactions_handler(
         .map_err(AppError::Database)?
     };
 
-    let mut translations = Vec::with_capacity(rows.len());
+    use sqlx::Row;
+    let items: Vec<(String, String)> = rows
+        .into_iter()
+        .map(|r| (r.get::<String, _>("id"), r.get::<String, _>("note")))
+        .collect();
 
-    for r in rows {
-        use sqlx::Row;
-        let id: String = r.get("id");
-        let note: String = r.get("note");
+    // Dịch song song toàn bộ ghi chú (thay vì tuần tự) để giảm đáng kể thời gian phản hồi
+    let notes: Vec<String> = items.iter().map(|(_, note)| note.clone()).collect();
+    let translated_notes = state.translation.translate_batch(&notes, target, None).await;
 
-        let translated = state.translation.translate(&note, target, None).await;
-
-        translations.push(TransactionNoteTranslation {
+    let translations: Vec<TransactionNoteTranslation> = items
+        .into_iter()
+        .zip(translated_notes.into_iter())
+        .map(|((id, note), translated)| TransactionNoteTranslation {
             id,
             original_note: note,
             translated_note: translated,
-        });
-    }
+        })
+        .collect();
 
     Ok(Json(TranslateTransactionsResponse {
         success: true,

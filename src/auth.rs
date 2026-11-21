@@ -84,37 +84,3 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct OptionalUser(pub Option<AuthenticatedUser>);
-
-#[async_trait]
-impl<S> FromRequestParts<S> for OptionalUser
-where
-    S: Send + Sync,
-    Arc<crate::AppState>: FromRef<S>,
-{
-    type Rejection = AppError;
-
-    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let app_state = Arc::<crate::AppState>::from_ref(state);
-
-        let maybe_auth_header = parts
-            .headers
-            .get(axum::http::header::AUTHORIZATION)
-            .and_then(|h| h.to_str().ok());
-
-        if let Some(auth_header) = maybe_auth_header {
-            if let Some(token) = auth_header.strip_prefix("Bearer ") {
-                if let Ok(claims) = verify_jwt(token, &app_state.config.jwt_secret) {
-                    return Ok(OptionalUser(Some(AuthenticatedUser {
-                        user_id: claims.sub,
-                        email: claims.email,
-                    })));
-                }
-            }
-        }
-
-        Ok(OptionalUser(None))
-    }
-}
-

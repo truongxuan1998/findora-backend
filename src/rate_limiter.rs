@@ -1,7 +1,9 @@
 use crate::audit::extract_client_info;
 use crate::i18n::Language;
+use crate::AppState;
 use axum::{
     body::Body,
+    extract::State,
     http::{header, HeaderValue, Request, Response, StatusCode},
     middleware::Next,
     response::IntoResponse,
@@ -113,7 +115,11 @@ pub fn get_global_limiter() -> &'static IpRateLimiter {
 }
 
 /// Middleware kiểm soát tần suất request (Rate Limiting) chống DDoS theo từng cấp độ API
-pub async fn rate_limit_middleware(req: Request<Body>, next: Next) -> Response<Body> {
+pub async fn rate_limit_middleware(
+    State(state): State<Arc<AppState>>,
+    req: Request<Body>,
+    next: Next,
+) -> Response<Body> {
     let path = req.uri().path();
 
     // 1. Ngoại lệ: Health check và Root ping không bao giờ bị chặn để Render/Uptime Monitor kiểm tra sống
@@ -134,14 +140,40 @@ pub async fn rate_limit_middleware(req: Request<Body>, next: Next) -> Response<B
     // 2. Phân cấp mức độ Rate Limit theo Endpoint
     // - Nhóm nhạy cảm (Auth, Forgot Password, Reset Password, Avatar upload): Tối đa 20 req / phút
     // - Nhóm API chung (Giao dịch, Ví, Danh mục, Báo cáo): Tối đa 120 req / phút (thừa đủ cho app, chặn triệt để DDoS)
-    let (limit, window_secs) = if path.starts_with("/api/auth/") || path == "/api/users/avatar" {
-        (20u32, 60u64)
+    let (tier, limit, window_secs) = if path.starts_with("/api/auth/") || path == "/api/users/avatar" {
+        ("auth", 20u32, 60u64)
     } else {
-        (120u32, 60u64)
+        ("general", 120u32, 60u64)
     };
 
-    let limiter = get_global_limiter();
-    match limiter.check(&ip, limit, window_secs).await {
+    // 3. Ưu tiên rate limit PHÂN TÁN qua Redis (chính xác khi scale nhiều instance);
+    //    tự động fallback về bộ đếm in-memory nếu Redis không khả dụng.
+    let outcome: Result<RateLimitResult, RateLimitExceeded> = {
+        let rl_key = format!("findora:rl:{}:{}", tier, ip);
+        if let Some(count) = state.redis.incr(&rl_key, window_secs).await {
+            let count = count.max(0) as u32;
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_secs();
+            if count > limit {
+                Err(RateLimitExceeded {
+                    limit,
+                    retry_after_secs: window_secs,
+                })
+            } else {
+                Ok(RateLimitResult {
+                    limit,
+                    remaining: limit.saturating_sub(count),
+                    reset_at: now + window_secs,
+                })
+            }
+        } else {
+            get_global_limiter().check(&ip, limit, window_secs).await
+        }
+    };
+
+    match outcome {
         Ok(result) => {
             let mut response = next.run(req).await;
 

@@ -395,7 +395,7 @@ async fn fetch_report_aggregates(
     wallet_id: Option<&str>,
     start_millis: i64,
     end_millis: i64,
-    lang: Language,
+    _lang: Language,
     fetch_tx_points: bool,
 ) -> AppResult<(i64, i64, Vec<CategorySummary>, Vec<CategorySummary>, Vec<(i64, String, i64)>)> {
     // 1. Totals
@@ -461,19 +461,15 @@ async fn fetch_report_aggregates(
             let name_vi: String = r.get("cat_name");
             let name_en: Option<String> = r.get("cat_name_en");
 
-            let display_name = match lang {
-                Language::En => name_en.clone().unwrap_or_else(|| name_vi.clone()),
-                Language::Vi => name_vi,
-            };
-
             let percentage = if total_expense > 0 {
                 ((total as f64 / total_expense as f64) * 1000.0).round() / 10.0
             } else {
                 0.0
             };
+
             CategorySummary {
                 category_id: r.get("cat_id"),
-                category_name: display_name,
+                category_name: name_vi,
                 category_name_en: name_en,
                 total_amount: total,
                 percentage,
@@ -511,19 +507,15 @@ async fn fetch_report_aggregates(
             let name_vi: String = r.get("cat_name");
             let name_en: Option<String> = r.get("cat_name_en");
 
-            let display_name = match lang {
-                Language::En => name_en.clone().unwrap_or_else(|| name_vi.clone()),
-                Language::Vi => name_vi,
-            };
-
             let percentage = if total_income > 0 {
                 ((total as f64 / total_income as f64) * 1000.0).round() / 10.0
             } else {
                 0.0
             };
+
             CategorySummary {
                 category_id: r.get("cat_id"),
-                category_name: display_name,
+                category_name: name_vi,
                 category_name_en: name_en,
                 total_amount: total,
                 percentage,

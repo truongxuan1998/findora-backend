@@ -43,20 +43,9 @@ pub async fn list_transactions_handler(
     .await
     .map_err(AppError::Database)?;
 
-    let mut txs = Vec::with_capacity(rows.len());
-    for r in rows {
-        let note: String = r.get("note");
-        let translated_note = if let Some(ref target) = query.translate_to {
-            if !note.trim().is_empty() {
-                Some(state.translation.translate(&note, target, None).await)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        txs.push(TransactionItem {
+    let mut txs: Vec<TransactionItem> = rows
+        .into_iter()
+        .map(|r| TransactionItem {
             id: r.get("id"),
             wallet_id: r.get("wallet_id"),
             amount: r.get("amount"),
@@ -65,12 +54,23 @@ pub async fn list_transactions_handler(
             category_id: r.get("category_id"),
             category_name: r.get("category_name"),
             timestamp: r.get("timestamp"),
-            note,
-            translated_note,
+            note: r.get("note"),
+            translated_note: None,
             created_at: r.get("created_at"),
             updated_at: r.get("updated_at"),
             deleted_at: r.get("deleted_at"),
-        });
+        })
+        .collect();
+
+    // Dịch ghi chú song song (thay vì tuần tự) nếu client yêu cầu translate_to
+    if let Some(ref target) = query.translate_to {
+        let notes: Vec<String> = txs.iter().map(|t| t.note.clone()).collect();
+        let translated = state.translation.translate_batch(&notes, target, None).await;
+        for (item, tr) in txs.iter_mut().zip(translated.into_iter()) {
+            if !item.note.trim().is_empty() {
+                item.translated_note = Some(tr);
+            }
+        }
     }
 
     Ok(Json(txs))
@@ -123,6 +123,39 @@ pub async fn create_transaction_handler(
         }
     };
 
+    // Với giao dịch chuyển khoản (TRANSFER): xác thực ví đích thuộc sở hữu người dùng
+    let transfer_to_wallet_id: Option<String> = if tx_type == "TRANSFER" {
+        let to_wid = payload
+            .to_wallet_id
+            .clone()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| AppError::BadRequest(match lang {
+                Language::Vi => "Giao dịch chuyển khoản yêu cầu ví đích (to_wallet_id)".to_string(),
+                Language::En => "Transfer requires a destination wallet (to_wallet_id)".to_string(),
+            }))?;
+
+        if to_wid == wallet_id {
+            return Err(AppError::BadRequest(match lang {
+                Language::Vi => "Ví nguồn và ví đích không được trùng nhau".to_string(),
+                Language::En => "Source and destination wallet must be different".to_string(),
+            }));
+        }
+
+        let exists = sqlx::query("SELECT id FROM findora.wallets WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL")
+            .bind(&to_wid)
+            .bind(&auth.user_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(AppError::Database)?;
+        if exists.is_none() {
+            return Err(AppError::NotFound(i18n::msg_wallet_not_found(lang).into()));
+        }
+        Some(to_wid)
+    } else {
+        None
+    };
+
     let now_millis = chrono::Utc::now().timestamp_millis();
     let timestamp = payload.timestamp.unwrap_or(now_millis);
     let tx_id = format!("tx_{}", Uuid::new_v4().simple());
@@ -130,11 +163,12 @@ pub async fn create_transaction_handler(
 
     // 2. Insert transaction
     sqlx::query(
-        "INSERT INTO findora.transactions (id, wallet_id, amount, currency, tx_type, category_id, timestamp, note, created_at, updated_at, created_at_tz)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9, to_timestamp($7 / 1000.0))"
+        "INSERT INTO findora.transactions (id, wallet_id, to_wallet_id, amount, currency, tx_type, category_id, timestamp, note, created_at, updated_at, created_at_tz)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, to_timestamp($8 / 1000.0))"
     )
     .bind(&tx_id)
     .bind(&wallet_id)
+    .bind(&transfer_to_wallet_id)
     .bind(payload.amount)
     .bind(&payload.currency)
     .bind(&tx_type)
@@ -147,16 +181,27 @@ pub async fn create_transaction_handler(
     .map_err(AppError::Database)?;
 
     // 3. Tự động cập nhật current_balance của ví trong cùng 1 ACID transaction
-    let balance_delta = match tx_type.as_str() {
+    let source_delta = match tx_type.as_str() {
         "INCOME" => payload.amount,
         "EXPENSE" => -payload.amount,
+        "TRANSFER" => -payload.amount, // Trừ tiền ở ví nguồn
         _ => 0,
     };
 
-    if balance_delta != 0 {
+    if source_delta != 0 {
         sqlx::query("UPDATE findora.wallets SET current_balance = current_balance + $1, updated_at = NOW() WHERE id = $2")
-            .bind(balance_delta)
+            .bind(source_delta)
             .bind(&wallet_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(AppError::Database)?;
+    }
+
+    // Với TRANSFER: cộng tiền vào ví đích (hoàn tất chuyển khoản 2 chiều trong cùng transaction)
+    if let Some(ref to_wid) = transfer_to_wallet_id {
+        sqlx::query("UPDATE findora.wallets SET current_balance = current_balance + $1, updated_at = NOW() WHERE id = $2")
+            .bind(payload.amount)
+            .bind(to_wid)
             .execute(&mut *tx)
             .await
             .map_err(AppError::Database)?;
@@ -203,7 +248,7 @@ pub async fn delete_transaction_handler(
 
     // 1. Kiểm tra giao dịch tồn tại, thuộc quyền sở hữu của user và chưa bị xóa
     let row = sqlx::query(
-        "SELECT t.id, t.wallet_id, t.amount, t.tx_type
+        "SELECT t.id, t.wallet_id, t.to_wallet_id, t.amount, t.tx_type
          FROM findora.transactions t
          INNER JOIN findora.wallets w ON t.wallet_id = w.id
          WHERE t.id = $1 AND w.user_id = $2 AND t.deleted_at IS NULL"
@@ -220,6 +265,7 @@ pub async fn delete_transaction_handler(
     };
 
     let wallet_id: String = row.get("wallet_id");
+    let to_wallet_id: Option<String> = row.get("to_wallet_id");
     let amount: i64 = row.get("amount");
     let tx_type: String = row.get("tx_type");
     let now_millis = chrono::Utc::now().timestamp_millis();
@@ -237,19 +283,32 @@ pub async fn delete_transaction_handler(
     .map_err(AppError::Database)?;
 
     // 3. Hoàn trả lại số dư ví (Balance reversal)
-    let balance_delta = match tx_type.as_str() {
-        "EXPENSE" => amount,   // Xóa chi tiêu thì hoàn lại tiền vào ví
-        "INCOME" => -amount,   // Xóa thu nhập thì trừ bớt tiền khỏi ví
+    let source_delta = match tx_type.as_str() {
+        "EXPENSE" => amount,    // Xóa chi tiêu thì hoàn lại tiền vào ví
+        "INCOME" => -amount,    // Xóa thu nhập thì trừ bớt tiền khỏi ví
+        "TRANSFER" => amount,   // Hoàn lại tiền đã chuyển đi cho ví nguồn
         _ => 0,
     };
 
-    if balance_delta != 0 {
+    if source_delta != 0 {
         sqlx::query("UPDATE findora.wallets SET current_balance = current_balance + $1, updated_at = NOW() WHERE id = $2")
-            .bind(balance_delta)
+            .bind(source_delta)
             .bind(&wallet_id)
             .execute(&mut *tx)
             .await
             .map_err(AppError::Database)?;
+    }
+
+    // Với TRANSFER: trừ lại tiền đã cộng vào ví đích
+    if tx_type == "TRANSFER" {
+        if let Some(ref to_wid) = to_wallet_id {
+            sqlx::query("UPDATE findora.wallets SET current_balance = current_balance - $1, updated_at = NOW() WHERE id = $2")
+                .bind(amount)
+                .bind(to_wid)
+                .execute(&mut *tx)
+                .await
+                .map_err(AppError::Database)?;
+        }
     }
 
     tx.commit().await.map_err(AppError::Database)?;

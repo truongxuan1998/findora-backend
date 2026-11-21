@@ -145,6 +145,7 @@ pub async fn run_schema_and_migrations(pool: &PgPool) -> Result<(), sqlx::Error>
         "CREATE TABLE IF NOT EXISTS findora.transactions (
             id TEXT PRIMARY KEY,
             wallet_id TEXT NOT NULL REFERENCES findora.wallets(id) ON DELETE CASCADE,
+            to_wallet_id TEXT REFERENCES findora.wallets(id) ON DELETE SET NULL,  -- Ví đích (chỉ dùng cho TRANSFER)
             amount BIGINT NOT NULL CHECK (amount > 0),
             currency VARCHAR(10) NOT NULL DEFAULT 'VND',
             tx_type VARCHAR(20) NOT NULL CHECK (tx_type IN ('EXPENSE', 'INCOME', 'TRANSFER')),
@@ -158,6 +159,7 @@ pub async fn run_schema_and_migrations(pool: &PgPool) -> Result<(), sqlx::Error>
             created_at_tz TIMESTAMPTZ DEFAULT NOW()
         );
         ALTER TABLE findora.transactions ADD COLUMN IF NOT EXISTS created_at_tz TIMESTAMPTZ DEFAULT NOW();
+        ALTER TABLE findora.transactions ADD COLUMN IF NOT EXISTS to_wallet_id TEXT;
         UPDATE findora.transactions SET created_at_tz = to_timestamp(timestamp / 1000.0) WHERE created_at_tz IS NULL;
         CREATE INDEX IF NOT EXISTS idx_tx_wallet_timestamp 
             ON findora.transactions(wallet_id, timestamp DESC) 

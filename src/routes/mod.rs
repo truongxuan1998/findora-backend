@@ -60,7 +60,11 @@ pub fn create_router(state: Arc<AppState>) -> Router {
             post(translate::translate_transactions_handler),
         )
         // Rate Limiter DDoS Middleware: Giới hạn tần suất request theo IP (Strict cho Auth/Upload, General cho API)
-        .layer(axum::middleware::from_fn(crate::rate_limiter::rate_limit_middleware))
+        // Dùng from_fn_with_state để middleware truy cập được Redis (rate limit phân tán khi scale nhiều instance)
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::rate_limiter::rate_limit_middleware,
+        ))
         // Audit Middleware: Ghi nhận IP, Location, Device Name, OS Version cho mọi request
         .layer(axum::middleware::from_fn(crate::audit::audit_log_middleware))
         .with_state(state)

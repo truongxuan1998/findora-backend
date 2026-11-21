@@ -21,6 +21,9 @@ pub struct TransactionItem {
 #[derive(Debug, Deserialize)]
 pub struct CreateTransactionRequest {
     pub wallet_id: Option<String>,
+    /// Ví đích — bắt buộc khi tx_type = "TRANSFER"
+    #[serde(default, alias = "toWalletId")]
+    pub to_wallet_id: Option<String>,
     pub amount: i64,
     #[serde(default = "default_currency")]
     pub currency: String,
