@@ -44,6 +44,11 @@ async fn test_forgot_and_reset_password_workflow() {
     let hashed = bcrypt::hash(old_pw, bcrypt::DEFAULT_COST).unwrap();
 
     // 1. Tạo user test bị khóa do nhập sai mật khẩu trước đó
+    let _ = sqlx::query("DELETE FROM findora.password_resets WHERE email = $1")
+        .bind(test_email)
+        .execute(&pool)
+        .await;
+
     let _ = sqlx::query(
         "INSERT INTO findora.users (id, email, full_name, password_hash, failed_login_attempts, locked_until, last_failed_at)
          VALUES ('usr_forgot_pwd_test', $1, 'Forgot Pwd User', $2, 8, NOW() + INTERVAL '1 day', NOW())
@@ -163,3 +168,137 @@ async fn test_forgot_and_reset_password_workflow() {
     let timeout_res = reset_password_handler(State(state.clone()), Language::Vi, Json(timeout_req)).await;
     assert!(timeout_res.is_err(), "Mã hết hạn 120s phải bị từ chối");
 }
+
+#[tokio::test]
+async fn test_daily_password_reset_limit_max_2_times() {
+    dotenv().ok();
+    dotenvy::from_filename("backend/.env").ok();
+    dotenvy::from_filename(".env").ok();
+
+    let db_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let pool = db::create_pool(&db_url).await.expect("Failed to create pool");
+
+    db::run_schema_and_migrations(&pool)
+        .await
+        .expect("Migration failed");
+
+    let config = Config::from_env().expect("Config must be valid");
+    let redis_service = Arc::new(findora_backend::redis_client::RedisService::disabled());
+    let email_service = Arc::new(findora_backend::email::EmailService::disabled());
+    let state = Arc::new(AppState {
+        pool: Arc::new(pool.clone()),
+        config,
+        redis: redis_service,
+        email: email_service,
+    });
+
+    let test_email = "daily_reset_limit_test@findora.app";
+    let pw = "InitialPassword123!";
+    let hashed = bcrypt::hash(pw, bcrypt::DEFAULT_COST).unwrap();
+
+    // 1. Tạo user test
+    let _ = sqlx::query(
+        "INSERT INTO findora.users (id, email, full_name, password_hash)
+         VALUES ('usr_daily_limit_test', $1, 'Daily Limit User', $2)
+         ON CONFLICT (email) DO UPDATE SET password_hash = $2"
+    )
+    .bind(test_email)
+    .bind(&hashed)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Dọn dẹp dữ liệu cũ của test này
+    sqlx::query("DELETE FROM findora.password_resets WHERE email = $1")
+        .bind(test_email)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // 2. Chèn 2 lần reset thành công trong vòng 24 giờ qua (used_at != NULL)
+    sqlx::query(
+        "INSERT INTO findora.password_resets (id, email, code, expires_at, used_at, created_at)
+         VALUES 
+         ('rst_daily_1', $1, '111111', NOW() + INTERVAL '1 hour', NOW() - INTERVAL '3 hours', NOW() - INTERVAL '3 hours'),
+         ('rst_daily_2', $1, '222222', NOW() + INTERVAL '1 hour', NOW() - INTERVAL '1 hour', NOW() - INTERVAL '1 hour')"
+    )
+    .bind(test_email)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // 3. Yêu cầu mã mới qua forgot_password_handler -> Phải bị từ chối vì đã đạt 2 lần/ngày
+    let forgot_req = ForgotPasswordRequest {
+        email: test_email.to_string(),
+    };
+    let forgot_res = forgot_password_handler(State(state.clone()), Language::Vi, Json(forgot_req)).await;
+    assert!(forgot_res.is_err(), "Yêu cầu mã khi đã đạt 2 lần reset/ngày phải bị từ chối");
+    match forgot_res.unwrap_err() {
+        AppError::TooManyRequests(msg) => {
+            assert!(
+                msg.contains("tối đa 2 lần trong 1 ngày"),
+                "Thông báo phải chứa thông tin giới hạn 2 lần: {}",
+                msg
+            );
+        }
+        other => panic!("Phải trả về TooManyRequests, nhận được: {:?}", other),
+    }
+
+    // 4. Thử gọi reset_password_handler trực tiếp -> Phải bị chặn với cùng thông báo
+    let reset_req = ResetPasswordRequest {
+        email: test_email.to_string(),
+        code: "111111".to_string(),
+        new_password: "NewPassword2026@!".to_string(),
+        confirm_password: Some("NewPassword2026@!".to_string()),
+    };
+    let reset_res = reset_password_handler(State(state.clone()), Language::Vi, Json(reset_req)).await;
+    assert!(reset_res.is_err(), "Reset khi đã đạt 2 lần/ngày phải bị từ chối");
+    match reset_res.unwrap_err() {
+        AppError::TooManyRequests(msg) => {
+            assert!(
+                msg.contains("tối đa 2 lần trong 1 ngày"),
+                "Thông báo phải chứa thông tin giới hạn 2 lần: {}",
+                msg
+            );
+        }
+        other => panic!("Phải trả về TooManyRequests, nhận được: {:?}", other),
+    }
+
+    // 5. Thử với tiếng Anh (Language::En) -> Thông báo đa ngữ chuẩn
+    let forgot_en = forgot_password_handler(
+        State(state.clone()),
+        Language::En,
+        Json(ForgotPasswordRequest { email: test_email.to_string() }),
+    ).await;
+    match forgot_en.unwrap_err() {
+        AppError::TooManyRequests(msg) => {
+            assert!(
+                msg.contains("daily limit of 2 password resets"),
+                "Thông báo tiếng Anh phải đúng chuẩn: {}",
+                msg
+            );
+        }
+        other => panic!("Phải trả về TooManyRequests, nhận được: {:?}", other),
+    }
+
+    // 6. Mô phỏng 1 lần reset cũ xảy ra cách đây hơn 24 giờ (NOW() - INTERVAL '25 hours')
+    sqlx::query(
+        "UPDATE findora.password_resets 
+         SET used_at = NOW() - INTERVAL '25 hours' 
+         WHERE id = 'rst_daily_1'"
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Lúc này trong 24h chỉ còn 1 lần reset -> Yêu cầu mã phải thành công!
+    let forgot_ok = forgot_password_handler(
+        State(state.clone()),
+        Language::Vi,
+        Json(ForgotPasswordRequest { email: test_email.to_string() }),
+    )
+    .await
+    .expect("Khi mới chỉ reset 1 lần trong 24h, phải được phép yêu cầu mã");
+    assert!(forgot_ok.0.success);
+}
+

@@ -364,6 +364,25 @@ pub async fn forgot_password_handler(
         }));
     }
 
+    // Giới hạn bảo mật: 1 ngày 1 tài khoản chỉ được đặt lại mật khẩu tối đa 2 lần
+    const MAX_DAILY_PASSWORD_RESETS: i64 = 2;
+    let daily_reset_count: i64 = sqlx::query(
+        "SELECT COUNT(*) FROM findora.password_resets 
+         WHERE email = $1 AND used_at > NOW() - INTERVAL '24 hours'"
+    )
+    .bind(&email)
+    .fetch_one(&*state.pool)
+    .await
+    .map_err(AppError::Database)?
+    .get(0);
+
+    if daily_reset_count >= MAX_DAILY_PASSWORD_RESETS {
+        warn!(email = %email, count = daily_reset_count, "Tài khoản đã đạt giới hạn đặt lại mật khẩu tối đa 2 lần trong 1 ngày");
+        return Err(AppError::TooManyRequests(
+            i18n::msg_daily_reset_password_limit_exceeded(lang).to_string(),
+        ));
+    }
+
     // Rate limiting: Tối đa 5 lần yêu cầu mã trong vòng 15 phút
     let recent_count: i64 = sqlx::query(
         "SELECT COUNT(*) FROM findora.password_resets 
@@ -444,7 +463,26 @@ pub async fn reset_password_handler(
         }
     }
 
-    // 1. Kiểm tra chính sách mật khẩu mạnh (ít nhất 8 ký tự, có số, ký tự đặc biệt)
+    // 1. Kiểm tra giới hạn: 1 ngày 1 tài khoản chỉ được đặt lại mật khẩu tối đa 2 lần
+    const MAX_DAILY_PASSWORD_RESETS: i64 = 2;
+    let daily_reset_count: i64 = sqlx::query(
+        "SELECT COUNT(*) FROM findora.password_resets 
+         WHERE email = $1 AND used_at > NOW() - INTERVAL '24 hours'"
+    )
+    .bind(&email)
+    .fetch_one(&*state.pool)
+    .await
+    .map_err(AppError::Database)?
+    .get(0);
+
+    if daily_reset_count >= MAX_DAILY_PASSWORD_RESETS {
+        warn!(email = %email, count = daily_reset_count, "Tài khoản đã đạt giới hạn đặt lại mật khẩu tối đa 2 lần trong 1 ngày");
+        return Err(AppError::TooManyRequests(
+            i18n::msg_daily_reset_password_limit_exceeded(lang).to_string(),
+        ));
+    }
+
+    // 2. Kiểm tra chính sách mật khẩu mạnh (ít nhất 8 ký tự, có số, ký tự đặc biệt)
     validate_password(&payload.new_password, lang)?;
 
     // 2. Kiểm tra mã xác thực trong database (chưa dùng và chưa hết hạn)

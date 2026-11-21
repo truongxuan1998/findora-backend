@@ -241,4 +241,12 @@ pub fn msg_too_many_reset_requests(lang: Language) -> &'static str {
     }
 }
 
+pub fn msg_daily_reset_password_limit_exceeded(lang: Language) -> &'static str {
+    match lang {
+        Language::Vi => "Tài khoản của bạn đã đạt giới hạn đặt lại mật khẩu tối đa 2 lần trong 1 ngày. Vui lòng thử lại vào ngày mai.",
+        Language::En => "Your account has reached the daily limit of 2 password resets. Please try again tomorrow.",
+    }
+}
+
+
 

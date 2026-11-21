@@ -1,6 +1,7 @@
 use findora_backend::i18n::{
-    msg_account_locked_until_tomorrow, msg_default_wallet_name, msg_login_success,
-    msg_register_success, msg_wrong_password_with_remaining, Language,
+    msg_account_locked_until_tomorrow, msg_daily_reset_password_limit_exceeded,
+    msg_default_wallet_name, msg_login_success, msg_register_success,
+    msg_wrong_password_with_remaining, Language,
 };
 
 #[test]
@@ -22,6 +23,9 @@ fn test_bilingual_messages() {
 
     assert!(msg_account_locked_until_tomorrow(Language::Vi).contains("tạm khóa"));
     assert!(msg_account_locked_until_tomorrow(Language::En).contains("temporarily locked"));
+
+    assert!(msg_daily_reset_password_limit_exceeded(Language::Vi).contains("tối đa 2 lần trong 1 ngày"));
+    assert!(msg_daily_reset_password_limit_exceeded(Language::En).contains("daily limit of 2 password resets"));
 
     let wrong_vi = msg_wrong_password_with_remaining(Language::Vi, 7);
     assert!(wrong_vi.contains("còn 7 lần thử"));

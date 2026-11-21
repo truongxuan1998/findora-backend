@@ -204,7 +204,7 @@ pub async fn run_schema_and_migrations(pool: &PgPool) -> Result<(), sqlx::Error>
     .await;
 
     // 7. Bảng Password Resets (Quên mật khẩu & Mã xác nhận 6 số)
-    sqlx::raw_sql(
+    let _ = sqlx::raw_sql(
         "CREATE TABLE IF NOT EXISTS findora.password_resets (
             id TEXT PRIMARY KEY,
             email TEXT NOT NULL,
@@ -213,10 +213,11 @@ pub async fn run_schema_and_migrations(pool: &PgPool) -> Result<(), sqlx::Error>
             used_at TIMESTAMPTZ,
             created_at TIMESTAMPTZ DEFAULT NOW()
         );
-        CREATE INDEX IF NOT EXISTS idx_pwd_resets_email ON findora.password_resets(email, expires_at);",
+        CREATE INDEX IF NOT EXISTS idx_pwd_resets_email ON findora.password_resets(email, expires_at);
+        CREATE INDEX IF NOT EXISTS idx_pwd_resets_email_used_at ON findora.password_resets(email, used_at);",
     )
     .execute(pool)
-    .await?;
+    .await;
 
     info!("🎯 Database schema Findora hoàn toàn sẵn sàng & chuẩn hóa.");
     Ok(())
