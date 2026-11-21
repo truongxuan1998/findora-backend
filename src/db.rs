@@ -12,7 +12,7 @@ pub async fn create_pool(db_url: &str) -> Result<PgPool, sqlx::Error> {
     let pool = PgPoolOptions::new()
         .max_connections(5) // Tối ưu cho Render Free-Tier (512MB RAM) và Supabase Pooler
         .min_connections(1)
-        .acquire_timeout(Duration::from_secs(5))
+        .acquire_timeout(Duration::from_secs(15))
         .idle_timeout(Duration::from_secs(300))
         .after_connect(|conn, _meta| {
             Box::pin(async move {
