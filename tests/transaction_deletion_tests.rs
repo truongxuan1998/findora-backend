@@ -30,11 +30,13 @@ async fn test_transaction_delete_and_note_management() {
     let config = Config::from_env().expect("Config must be valid");
     let redis_service = Arc::new(findora_backend::redis_client::RedisService::disabled());
     let email_service = Arc::new(findora_backend::email::EmailService::disabled());
+    let translation_service = Arc::new(findora_backend::translation::TranslationService::new(redis_service.clone()));
     let state = Arc::new(AppState {
         pool: Arc::new(pool.clone()),
         config,
         redis: redis_service,
         email: email_service,
+        translation: translation_service,
     });
 
     let test_user_id = "usr_tx_del_test_1";
@@ -138,6 +140,7 @@ async fn test_transaction_delete_and_note_management() {
     let list_req = TransactionQuery {
         wallet_id: Some(test_wallet_id.to_string()),
         category_id: None,
+        translate_to: None,
         limit: Some(10),
         offset: Some(0),
     };

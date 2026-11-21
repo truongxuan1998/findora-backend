@@ -43,9 +43,20 @@ pub async fn list_transactions_handler(
     .await
     .map_err(AppError::Database)?;
 
-    let txs = rows
-        .into_iter()
-        .map(|r| TransactionItem {
+    let mut txs = Vec::with_capacity(rows.len());
+    for r in rows {
+        let note: String = r.get("note");
+        let translated_note = if let Some(ref target) = query.translate_to {
+            if !note.trim().is_empty() {
+                Some(state.translation.translate(&note, target, None).await)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        txs.push(TransactionItem {
             id: r.get("id"),
             wallet_id: r.get("wallet_id"),
             amount: r.get("amount"),
@@ -54,12 +65,13 @@ pub async fn list_transactions_handler(
             category_id: r.get("category_id"),
             category_name: r.get("category_name"),
             timestamp: r.get("timestamp"),
-            note: r.get("note"),
+            note,
+            translated_note,
             created_at: r.get("created_at"),
             updated_at: r.get("updated_at"),
             deleted_at: r.get("deleted_at"),
-        })
-        .collect();
+        });
+    }
 
     Ok(Json(txs))
 }
@@ -172,6 +184,7 @@ pub async fn create_transaction_handler(
         category_name: None,
         timestamp,
         note,
+        translated_note: None,
         created_at: now_millis,
         updated_at: now_millis,
         deleted_at: None,

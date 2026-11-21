@@ -26,11 +26,13 @@ async fn test_financial_report_summary_week_month_year() {
     let config = Config::from_env().expect("Config must be valid");
     let redis_service = Arc::new(findora_backend::redis_client::RedisService::disabled());
     let email_service = Arc::new(findora_backend::email::EmailService::disabled());
+    let translation_service = Arc::new(findora_backend::translation::TranslationService::new(redis_service.clone()));
     let state = Arc::new(AppState {
         pool: Arc::new(pool.clone()),
         config,
         redis: redis_service,
         email: email_service,
+        translation: translation_service,
     });
 
     let test_user_id = "usr_stat_test_1";

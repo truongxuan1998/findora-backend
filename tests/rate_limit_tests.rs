@@ -27,11 +27,13 @@ async fn test_rate_limit_lockout_workflow() {
     let config = Config::from_env().expect("Config must be valid");
     let redis_service = Arc::new(findora_backend::redis_client::RedisService::disabled());
     let email_service = Arc::new(findora_backend::email::EmailService::disabled());
+    let translation_service = Arc::new(findora_backend::translation::TranslationService::new(redis_service.clone()));
     let state = Arc::new(AppState {
         pool: Arc::new(pool.clone()),
         config,
         redis: redis_service,
         email: email_service,
+        translation: translation_service,
     });
 
     let test_email = "rate_limit_test@findora.app";

@@ -54,11 +54,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.brevo_sender_name.clone(),
     ));
 
+    let translation_service = Arc::new(findora_backend::translation::TranslationService::new(redis_service.clone()));
+
     let state = Arc::new(AppState {
         pool: Arc::new(pool),
         config: config.clone(),
         redis: redis_service,
         email: email_service,
+        translation: translation_service,
     });
 
     let cors = CorsLayer::new()

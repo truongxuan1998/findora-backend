@@ -11,6 +11,8 @@ pub struct TransactionItem {
     pub category_name: Option<String>,
     pub timestamp: i64,  // Unix millis
     pub note: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub translated_note: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
     pub deleted_at: Option<i64>,
@@ -32,6 +34,7 @@ pub struct CreateTransactionRequest {
 pub struct TransactionQuery {
     pub wallet_id: Option<String>,
     pub category_id: Option<String>,
+    pub translate_to: Option<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
 }

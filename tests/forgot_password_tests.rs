@@ -31,11 +31,13 @@ async fn test_forgot_and_reset_password_workflow() {
     let config = Config::from_env().expect("Config must be valid");
     let redis_service = Arc::new(findora_backend::redis_client::RedisService::disabled());
     let email_service = Arc::new(findora_backend::email::EmailService::disabled());
+    let translation_service = Arc::new(findora_backend::translation::TranslationService::new(redis_service.clone()));
     let state = Arc::new(AppState {
         pool: Arc::new(pool.clone()),
         config,
         redis: redis_service,
         email: email_service,
+        translation: translation_service,
     });
 
     let test_email = "forgot_pwd_test@findora.app";
@@ -185,11 +187,13 @@ async fn test_daily_password_reset_limit_max_2_times() {
     let config = Config::from_env().expect("Config must be valid");
     let redis_service = Arc::new(findora_backend::redis_client::RedisService::disabled());
     let email_service = Arc::new(findora_backend::email::EmailService::disabled());
+    let translation_service = Arc::new(findora_backend::translation::TranslationService::new(redis_service.clone()));
     let state = Arc::new(AppState {
         pool: Arc::new(pool.clone()),
         config,
         redis: redis_service,
         email: email_service,
+        translation: translation_service,
     });
 
     let test_email = "daily_reset_limit_test@findora.app";
