@@ -30,7 +30,7 @@ pub async fn monthly_report_handler(
     let vn_offset = FixedOffset::east_opt(7 * 3600).unwrap();
     let now_vn = Utc::now().with_timezone(&vn_offset);
     let year = query.year.unwrap_or_else(|| now_vn.year());
-    let month = query.month.unwrap_or_else(|| now_vn.month()).clamp(1, 12);
+    let month = query.month.unwrap_or(12).clamp(1, 12);
 
     let start_date = NaiveDate::from_ymd_opt(year, month, 1)
         .ok_or_else(|| AppError::BadRequest("Năm hoặc tháng không hợp lệ".into()))?;
@@ -574,8 +574,8 @@ pub async fn category_report_handler(
     let now_vn = Utc::now().with_timezone(&vn_offset);
 
     let year = query.year.unwrap_or_else(|| now_vn.year());
-    let month = query.month.unwrap_or_else(|| now_vn.month()).clamp(1, 12);
-    let months_count = query.months_count.unwrap_or(5).clamp(2, 12) as i32;
+    let month = query.month.unwrap_or(12).clamp(1, 12);
+    let months_count = query.months_count.unwrap_or(12).clamp(1, 12) as i32;
 
     let user_id = auth.0.map(|u| u.user_id);
 

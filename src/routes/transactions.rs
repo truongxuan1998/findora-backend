@@ -18,7 +18,7 @@ pub async fn list_transactions_handler(
     auth: AuthenticatedUser,
     Query(query): Query<TransactionQuery>,
 ) -> AppResult<Json<Vec<TransactionItem>>> {
-    let limit = query.limit.unwrap_or(50).clamp(1, 200);
+    let limit = query.limit.unwrap_or(50).clamp(1, 1000);
     let offset = query.offset.unwrap_or(0).max(0);
 
     let rows = sqlx::query(
