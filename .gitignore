@@ -13,6 +13,7 @@
 secrets.json
 credentials.json
 service_account.json
+.mcp.json
 
 # Rust & Cargo build outputs
 /target
