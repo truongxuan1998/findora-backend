@@ -48,6 +48,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/reports/monthly", get(reports::monthly_report_handler))
         .route("/api/reports/summary", get(reports::summary_report_handler))
         .route("/api/reports/statistics", get(reports::summary_report_handler))
+        .route("/api/reports/category/:id", get(reports::category_report_handler))
         // Rate Limiter DDoS Middleware: Giới hạn tần suất request theo IP (Strict cho Auth/Upload, General cho API)
         .layer(axum::middleware::from_fn(crate::rate_limiter::rate_limit_middleware))
         // Audit Middleware: Ghi nhận IP, Location, Device Name, OS Version cho mọi request

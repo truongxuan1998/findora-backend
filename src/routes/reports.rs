@@ -2,12 +2,13 @@ use crate::auth::OptionalUser;
 use crate::errors::{AppError, AppResult};
 use crate::i18n::Language;
 use crate::models::report::{
-    CategorySummary, FinancialReportResponse, MonthlyReportQuery, MonthlyReportResponse,
-    ReportSummaryQuery, TimeSeriesPoint,
+    CategoryMonthStat, CategoryReportQuery, CategoryReportResponse, CategorySummary,
+    FinancialReportResponse, MonthlyReportQuery, MonthlyReportResponse, ReportSummaryQuery,
+    TimeSeriesPoint,
 };
 use crate::AppState;
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     Json,
 };
 use chrono::{Datelike, Duration, FixedOffset, NaiveDate, Utc};
@@ -560,4 +561,121 @@ async fn fetch_report_aggregates(
     }
 
     Ok((total_income, total_expense, expense_breakdown, income_breakdown, tx_points))
+}
+
+pub async fn category_report_handler(
+    State(state): State<Arc<AppState>>,
+    Path(category_id): Path<String>,
+    lang: Language,
+    auth: OptionalUser,
+    Query(query): Query<CategoryReportQuery>,
+) -> AppResult<Json<CategoryReportResponse>> {
+    let vn_offset = FixedOffset::east_opt(7 * 3600).unwrap();
+    let now_vn = Utc::now().with_timezone(&vn_offset);
+
+    let year = query.year.unwrap_or_else(|| now_vn.year());
+    let month = query.month.unwrap_or_else(|| now_vn.month()).clamp(1, 12);
+    let months_count = query.months_count.unwrap_or(5).clamp(2, 12) as i32;
+
+    let user_id = auth.0.map(|u| u.user_id);
+
+    // Fetch category info
+    let cat_row = sqlx::query(
+        "SELECT id, name, name_en, icon, color, type FROM findora.categories WHERE id = $1"
+    )
+    .bind(&category_id)
+    .fetch_optional(&*state.pool)
+    .await
+    .map_err(AppError::Database)?
+    .ok_or_else(|| AppError::NotFound("Không tìm thấy danh mục".into()))?;
+
+    let cat_name: String = cat_row.get("name");
+    let cat_name_en: Option<String> = cat_row.get("name_en");
+    let cat_icon: String = cat_row.get("icon");
+    let cat_color: String = cat_row.get("color");
+    let cat_type: String = cat_row.get("type");
+
+    let display_name = match lang {
+        Language::En => cat_name_en.clone().unwrap_or_else(|| cat_name.clone()),
+        Language::Vi => cat_name.clone(),
+    };
+
+    // Build the list of target months (ending with (year, month))
+    // e.g. for (2026, 11) with count 5 -> 7, 8, 9, 10, 11
+    let mut target_months: Vec<(i32, u32)> = Vec::new();
+    let mut cur_y = year;
+    let mut cur_m = month as i32;
+    for _ in 0..months_count {
+        target_months.push((cur_y, cur_m as u32));
+        cur_m -= 1;
+        if cur_m < 1 {
+            cur_m = 12;
+            cur_y -= 1;
+        }
+    }
+    target_months.reverse();
+
+    let mut monthly_history = Vec::with_capacity(target_months.len());
+    let mut current_month_total: i64 = 0;
+
+    for (y, m) in target_months {
+        let m_start = NaiveDate::from_ymd_opt(y, m, 1).unwrap();
+        let m_end = if m == 12 {
+            NaiveDate::from_ymd_opt(y + 1, 1, 1).unwrap()
+        } else {
+            NaiveDate::from_ymd_opt(y, m + 1, 1).unwrap()
+        };
+        let s_dt = m_start.and_hms_opt(0, 0, 0).unwrap().and_local_timezone(vn_offset).unwrap();
+        let e_dt = m_end.and_hms_opt(0, 0, 0).unwrap().and_local_timezone(vn_offset).unwrap();
+
+        let row = sqlx::query(
+            "SELECT COALESCE(SUM(t.amount), 0)::BIGINT as sum
+             FROM findora.transactions t
+             INNER JOIN findora.wallets w ON t.wallet_id = w.id
+             WHERE t.deleted_at IS NULL
+               AND t.category_id = $1
+               AND t.timestamp >= $2
+               AND t.timestamp < $3
+               AND ($4::TEXT IS NULL OR w.user_id = $4)
+               AND ($5::TEXT IS NULL OR t.wallet_id = $5)"
+        )
+        .bind(&category_id)
+        .bind(s_dt.timestamp_millis())
+        .bind(e_dt.timestamp_millis())
+        .bind(&user_id)
+        .bind(&query.wallet_id)
+        .fetch_one(&*state.pool)
+        .await
+        .map_err(AppError::Database)?;
+
+        let sum: i64 = row.get("sum");
+        let label = match lang {
+            Language::Vi => format!("T{}", m),
+            Language::En => format!("M{}", m),
+        };
+
+        if y == year && m == month {
+            current_month_total = sum;
+        }
+
+        monthly_history.push(CategoryMonthStat {
+            year: y,
+            month: m,
+            label,
+            total: sum,
+        });
+    }
+
+    Ok(Json(CategoryReportResponse {
+        category_id,
+        category_name: display_name,
+        category_name_en: cat_name_en,
+        category_icon: cat_icon,
+        category_color: cat_color,
+        tx_type: cat_type,
+        selected_year: year,
+        selected_month: month,
+        current_month_total,
+        monthly_history,
+    }))
 }

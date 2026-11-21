@@ -79,3 +79,43 @@ pub struct FinancialReportResponse {
     #[serde(rename = "timeSeries")]
     pub time_series: Vec<TimeSeriesPoint>,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct CategoryReportQuery {
+    pub year: Option<i32>,
+    pub month: Option<u32>,
+    pub months_count: Option<u32>,
+    pub wallet_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CategoryMonthStat {
+    pub year: i32,
+    pub month: u32,
+    pub label: String,
+    pub total: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CategoryReportResponse {
+    #[serde(rename = "categoryId")]
+    pub category_id: String,
+    #[serde(rename = "categoryName")]
+    pub category_name: String,
+    #[serde(rename = "categoryNameEn", skip_serializing_if = "Option::is_none")]
+    pub category_name_en: Option<String>,
+    #[serde(rename = "categoryIcon")]
+    pub category_icon: String,
+    #[serde(rename = "categoryColor")]
+    pub category_color: String,
+    #[serde(rename = "txType")]
+    pub tx_type: String,
+    #[serde(rename = "selectedYear")]
+    pub selected_year: i32,
+    #[serde(rename = "selectedMonth")]
+    pub selected_month: u32,
+    #[serde(rename = "currentMonthTotal")]
+    pub current_month_total: i64,
+    #[serde(rename = "monthlyHistory")]
+    pub monthly_history: Vec<CategoryMonthStat>,
+}
