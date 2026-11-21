@@ -1,4 +1,4 @@
-use crate::auth::OptionalUser;
+use crate::auth::AuthenticatedUser;
 use crate::errors::{AppError, AppResult};
 use crate::i18n::Language;
 use crate::models::report::{
@@ -24,13 +24,13 @@ struct TimeBucket {
 pub async fn monthly_report_handler(
     State(state): State<Arc<AppState>>,
     lang: Language,
-    auth: OptionalUser,
+    auth: AuthenticatedUser,
     Query(query): Query<MonthlyReportQuery>,
 ) -> AppResult<Json<MonthlyReportResponse>> {
     let vn_offset = FixedOffset::east_opt(7 * 3600).unwrap();
     let now_vn = Utc::now().with_timezone(&vn_offset);
     let year = query.year.unwrap_or_else(|| now_vn.year());
-    let month = query.month.unwrap_or(12).clamp(1, 12);
+    let month = query.month.unwrap_or_else(|| now_vn.month()).clamp(1, 12);
 
     let start_date = NaiveDate::from_ymd_opt(year, month, 1)
         .ok_or_else(|| AppError::BadRequest("Năm hoặc tháng không hợp lệ".into()))?;
@@ -54,7 +54,7 @@ pub async fn monthly_report_handler(
         .unwrap();
     let end_millis = end_dt.timestamp_millis();
 
-    let user_id = auth.0.map(|u| u.user_id);
+    let user_id = Some(auth.user_id);
     let cache_key = format!(
         "findora:cache:report:{}:{}:{}:{}:{}",
         user_id.as_deref().unwrap_or("anon"),
@@ -102,7 +102,7 @@ pub async fn monthly_report_handler(
 pub async fn summary_report_handler(
     State(state): State<Arc<AppState>>,
     lang: Language,
-    auth: OptionalUser,
+    auth: AuthenticatedUser,
     Query(query): Query<ReportSummaryQuery>,
 ) -> AppResult<Json<FinancialReportResponse>> {
     let vn_offset = FixedOffset::east_opt(7 * 3600).unwrap();
@@ -130,7 +130,7 @@ pub async fn summary_report_handler(
             .unwrap_or(ref_date);
     }
 
-    let user_id = auth.0.map(|u| u.user_id);
+    let user_id = Some(auth.user_id);
 
     let (start_date, end_date, start_millis, end_millis, title, resp_year, resp_month, resp_week, buckets) =
         match period.as_str() {
@@ -567,7 +567,7 @@ pub async fn category_report_handler(
     State(state): State<Arc<AppState>>,
     Path(category_id): Path<String>,
     lang: Language,
-    auth: OptionalUser,
+    auth: AuthenticatedUser,
     Query(query): Query<CategoryReportQuery>,
 ) -> AppResult<Json<CategoryReportResponse>> {
     let vn_offset = FixedOffset::east_opt(7 * 3600).unwrap();
@@ -577,7 +577,7 @@ pub async fn category_report_handler(
     let month = query.month.unwrap_or(12).clamp(1, 12);
     let months_count = query.months_count.unwrap_or(12).clamp(1, 12) as i32;
 
-    let user_id = auth.0.map(|u| u.user_id);
+    let user_id = Some(auth.user_id);
 
     // Fetch category info
     let cat_row = sqlx::query(

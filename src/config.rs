@@ -29,15 +29,25 @@ impl Config {
             .parse::<u16>()
             .unwrap_or(10000);
 
-        let jwt_secret = env::var("JWT_SECRET")
-            .unwrap_or_else(|_| "findora_super_secret_jwt_key_2026_change_in_prod".to_string());
-
         let env = env::var("APP_ENV")
             .unwrap_or_else(|_| "production".to_string());
 
-        // Cấu hình Supabase Storage
-        let supabase_url = env::var("SUPABASE_URL")
-            .unwrap_or_else(|_| "https://jbqwbiqrylkiwqhjwgfn.supabase.co".to_string());
+        // JWT_SECRET: bắt buộc phải cấu hình trong production, tuyệt đối không dùng secret mặc định
+        let jwt_secret = match env::var("JWT_SECRET") {
+            Ok(s) if !s.trim().is_empty() => s,
+            _ => {
+                if env == "production" {
+                    return Err(
+                        "JWT_SECRET bắt buộc phải được cấu hình trong môi trường production (không có giá trị mặc định vì lý do bảo mật)!".to_string()
+                    );
+                }
+                eprintln!("⚠️  JWT_SECRET chưa được cấu hình — dùng secret mặc định CHỈ dành cho development.");
+                "findora_dev_only_secret_do_not_use_in_prod".to_string()
+            }
+        };
+
+        // Cấu hình Supabase Storage (không hardcode project URL thật trong source)
+        let supabase_url = env::var("SUPABASE_URL").unwrap_or_default();
 
         let supabase_key = env::var("SUPABASE_SERVICE_KEY")
             .or_else(|_| env::var("SUPABASE_KEY"))

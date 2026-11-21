@@ -1,6 +1,6 @@
 use axum::extract::{Query, State};
 use dotenvy::dotenv;
-use findora_backend::auth::OptionalUser;
+use findora_backend::auth::AuthenticatedUser;
 use findora_backend::config::Config;
 use findora_backend::db;
 use findora_backend::i18n::Language;
@@ -140,10 +140,10 @@ async fn test_financial_report_summary_week_month_year() {
     .await
     .unwrap();
 
-    let auth_user = OptionalUser(Some(findora_backend::auth::AuthenticatedUser {
+    let auth_user = AuthenticatedUser {
         user_id: test_user_id.to_string(),
         email: test_email.to_string(),
-    }));
+    };
 
     // 1. Thống kê theo TUẦN (Week)
     let week_query = ReportSummaryQuery {
