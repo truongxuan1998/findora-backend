@@ -215,6 +215,56 @@ impl RedisService {
         false
     }
 
+    /// Xóa toàn bộ key khớp với pattern (ví dụ: findora:cache:report:user_id:*)
+    pub async fn del_pattern(&self, pattern: &str) -> bool {
+        if let Some(mut mgr) = self.manager.clone() {
+            let keys_res: Result<Vec<String>, _> = redis::cmd("KEYS").arg(pattern).query_async(&mut mgr).await;
+            if let Ok(keys) = keys_res {
+                if !keys.is_empty() {
+                    let _: Result<(), _> = redis::cmd("DEL").arg(&keys).query_async(&mut mgr).await;
+                }
+                return true;
+            }
+        }
+
+        if let (Some(url), Some(token)) = (&self.rest_url, &self.rest_token) {
+            let cmd = serde_json::json!(["KEYS", pattern]);
+            if let Ok(resp) = self
+                .http_client
+                .post(url)
+                .header("Authorization", format!("Bearer {}", token))
+                .header("Content-Type", "application/json")
+                .json(&cmd)
+                .send()
+                .await
+            {
+                if resp.status().is_success() {
+                    if let Ok(json) = resp.json::<Value>().await {
+                        if let Some(keys_val) = json.get("result").and_then(|v| v.as_array()) {
+                            let keys: Vec<String> = keys_val.iter().filter_map(|k| k.as_str().map(|s| s.to_string())).collect();
+                            if !keys.is_empty() {
+                                let mut del_cmd = vec![serde_json::json!("DEL")];
+                                for k in keys {
+                                    del_cmd.push(serde_json::json!(k));
+                                }
+                                let _ = self
+                                    .http_client
+                                    .post(url)
+                                    .header("Authorization", format!("Bearer {}", token))
+                                    .header("Content-Type", "application/json")
+                                    .json(&del_cmd)
+                                    .send()
+                                    .await;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
     /// Tăng giá trị key lên 1 kèm TTL (dùng cho Distributed Rate Limiting)
     pub async fn incr(&self, key: &str, ttl_secs: u64) -> Option<i64> {
         if let Some(mut mgr) = self.manager.clone() {

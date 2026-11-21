@@ -33,7 +33,17 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         // Wallets
         .route("/api/wallets", get(wallets::list_wallets_handler).post(wallets::create_wallet_handler))
         // Transactions
-        .route("/api/transactions", get(transactions::list_transactions_handler).post(transactions::create_transaction_handler))
+        .route(
+            "/api/transactions",
+            get(transactions::list_transactions_handler)
+                .post(transactions::create_transaction_handler)
+                .delete(transactions::clear_all_transactions_handler),
+        )
+        .route(
+            "/api/transactions/:id",
+            axum::routing::delete(transactions::delete_transaction_handler)
+                .patch(transactions::update_transaction_note_handler),
+        )
         // Reports
         .route("/api/reports/monthly", get(reports::monthly_report_handler))
         // Rate Limiter DDoS Middleware: Giới hạn tần suất request theo IP (Strict cho Auth/Upload, General cho API)

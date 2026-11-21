@@ -4,10 +4,11 @@ use crate::i18n::{self, Language};
 use crate::models::transaction::{CreateTransactionRequest, TransactionItem, TransactionQuery};
 use crate::AppState;
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
+use serde::Deserialize;
 use sqlx::Row;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -151,10 +152,14 @@ pub async fn create_transaction_handler(
 
     tx.commit().await.map_err(AppError::Database)?;
 
-    // Xóa Cache danh sách ví của user trong Redis vì số dư ví (current_balance) vừa thay đổi
+    // Xóa Cache danh sách ví và báo cáo của user trong Redis vì số dư và tổng chi tiêu vừa thay đổi
     state
         .redis
         .del(&format!("findora:cache:wallets:{}", auth.user_id))
+        .await;
+    state
+        .redis
+        .del_pattern(&format!("findora:cache:report:{}*", auth.user_id))
         .await;
 
     let item = TransactionItem {
@@ -173,4 +178,164 @@ pub async fn create_transaction_handler(
     };
 
     Ok((StatusCode::CREATED, Json(item)))
+}
+
+/// Xóa một giao dịch (Soft Delete) và hoàn lại số dư ví tương ứng
+pub async fn delete_transaction_handler(
+    State(state): State<Arc<AppState>>,
+    auth: AuthenticatedUser,
+    Path(tx_id): Path<String>,
+) -> AppResult<Json<serde_json::Value>> {
+    let mut tx = state.pool.begin().await.map_err(AppError::Database)?;
+
+    // 1. Kiểm tra giao dịch tồn tại, thuộc quyền sở hữu của user và chưa bị xóa
+    let row = sqlx::query(
+        "SELECT t.id, t.wallet_id, t.amount, t.tx_type
+         FROM findora.transactions t
+         INNER JOIN findora.wallets w ON t.wallet_id = w.id
+         WHERE t.id = $1 AND w.user_id = $2 AND t.deleted_at IS NULL"
+    )
+    .bind(&tx_id)
+    .bind(&auth.user_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(AppError::Database)?;
+
+    let row = match row {
+        Some(r) => r,
+        None => return Err(AppError::NotFound("Không tìm thấy giao dịch hoặc giao dịch đã bị xóa".into())),
+    };
+
+    let wallet_id: String = row.get("wallet_id");
+    let amount: i64 = row.get("amount");
+    let tx_type: String = row.get("tx_type");
+    let now_millis = chrono::Utc::now().timestamp_millis();
+
+    // 2. Đánh dấu xóa mềm (soft-delete)
+    sqlx::query(
+        "UPDATE findora.transactions 
+         SET deleted_at = $1, updated_at = $1, sync_version = sync_version + 1 
+         WHERE id = $2"
+    )
+    .bind(now_millis)
+    .bind(&tx_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::Database)?;
+
+    // 3. Hoàn trả lại số dư ví (Balance reversal)
+    let balance_delta = match tx_type.as_str() {
+        "EXPENSE" => amount,   // Xóa chi tiêu thì hoàn lại tiền vào ví
+        "INCOME" => -amount,   // Xóa thu nhập thì trừ bớt tiền khỏi ví
+        _ => 0,
+    };
+
+    if balance_delta != 0 {
+        sqlx::query("UPDATE findora.wallets SET current_balance = current_balance + $1, updated_at = NOW() WHERE id = $2")
+            .bind(balance_delta)
+            .bind(&wallet_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(AppError::Database)?;
+    }
+
+    tx.commit().await.map_err(AppError::Database)?;
+
+    // Xóa Cache Redis liên quan
+    state.redis.del(&format!("findora:cache:wallets:{}", auth.user_id)).await;
+    state.redis.del_pattern(&format!("findora:cache:report:{}*", auth.user_id)).await;
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "message": "Đã xóa giao dịch thành công",
+        "id": tx_id
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateNoteRequest {
+    pub note: Option<String>,
+}
+
+/// Xóa hoặc cập nhật nội dung ghi chú của một giao dịch
+pub async fn update_transaction_note_handler(
+    State(state): State<Arc<AppState>>,
+    auth: AuthenticatedUser,
+    Path(tx_id): Path<String>,
+    Json(payload): Json<UpdateNoteRequest>,
+) -> AppResult<Json<serde_json::Value>> {
+    let now_millis = chrono::Utc::now().timestamp_millis();
+    let note = payload.note.unwrap_or_default().trim().to_string();
+
+    let res = sqlx::query(
+        "UPDATE findora.transactions t
+         SET note = $1, updated_at = $2, sync_version = sync_version + 1
+         FROM findora.wallets w
+         WHERE t.id = $3 AND t.wallet_id = w.id AND w.user_id = $4 AND t.deleted_at IS NULL"
+    )
+    .bind(&note)
+    .bind(now_millis)
+    .bind(&tx_id)
+    .bind(&auth.user_id)
+    .execute(&*state.pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    if res.rows_affected() == 0 {
+        return Err(AppError::NotFound("Không tìm thấy giao dịch hoặc không có quyền chỉnh sửa".into()));
+    }
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "message": "Đã cập nhật ghi chú thành công",
+        "id": tx_id,
+        "note": note
+    })))
+}
+
+/// Xóa toàn bộ dữ liệu ghi chú giao dịch của người dùng
+pub async fn clear_all_transactions_handler(
+    State(state): State<Arc<AppState>>,
+    auth: AuthenticatedUser,
+) -> AppResult<Json<serde_json::Value>> {
+    let mut tx = state.pool.begin().await.map_err(AppError::Database)?;
+    let now_millis = chrono::Utc::now().timestamp_millis();
+
+    // 1. Soft-delete toàn bộ transactions của user
+    let res = sqlx::query(
+        "UPDATE findora.transactions t
+         SET deleted_at = $1, updated_at = $1, sync_version = sync_version + 1
+         FROM findora.wallets w
+         WHERE t.wallet_id = w.id AND w.user_id = $2 AND t.deleted_at IS NULL"
+    )
+    .bind(now_millis)
+    .bind(&auth.user_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::Database)?;
+
+    let count = res.rows_affected();
+
+    // 2. Reset số dư các ví về initial_balance
+    sqlx::query(
+        "UPDATE findora.wallets 
+         SET current_balance = initial_balance, updated_at = NOW() 
+         WHERE user_id = $1 AND deleted_at IS NULL"
+    )
+    .bind(&auth.user_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(AppError::Database)?;
+
+    tx.commit().await.map_err(AppError::Database)?;
+
+    // Xóa Cache Redis
+    state.redis.del(&format!("findora:cache:wallets:{}", auth.user_id)).await;
+    state.redis.del_pattern(&format!("findora:cache:report:{}*", auth.user_id)).await;
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "message": format!("Đã xóa thành công {} bản ghi ghi chú giao dịch", count),
+        "deleted_count": count
+    })))
 }
