@@ -126,6 +126,7 @@ pub async fn register_handler(
                 email,
                 full_name: name.to_string(),
                 phone_number: phone,
+                avatar_url: None,
             }),
         }),
     ))
@@ -142,7 +143,7 @@ pub async fn login_handler(
     let now_vn = now_utc.with_timezone(&vn_offset);
 
     let user_row = sqlx::query(
-        "SELECT id, email, full_name, phone_number, password_hash, 
+        "SELECT id, email, full_name, phone_number, password_hash, avatar_url,
                 failed_login_attempts, locked_until, last_failed_at
          FROM findora.users 
          WHERE email = $1"
@@ -275,6 +276,8 @@ pub async fn login_handler(
     let full_name: String = row.get("full_name");
     let phone_number: String = row.get("phone_number");
 
+    let avatar_url: Option<String> = row.get("avatar_url");
+
     info!(user_id = %user_id, email = %email, lang = %lang.code(), "🔐 Đăng nhập thành công, đã reset rate limit attempts");
 
     let token = create_jwt(&user_id, &email, &state.config.jwt_secret, 30)?;
@@ -288,6 +291,8 @@ pub async fn login_handler(
             email,
             full_name,
             phone_number,
+
+        avatar_url,
         }),
     }))
 }
@@ -298,7 +303,7 @@ pub async fn me_handler(
     auth: AuthenticatedUser,
 ) -> AppResult<Json<UserResponse>> {
     let row = sqlx::query(
-        "SELECT id, email, full_name, phone_number 
+        "SELECT id, email, full_name, phone_number, avatar_url 
          FROM findora.users 
          WHERE id = $1"
     )
@@ -313,6 +318,7 @@ pub async fn me_handler(
         email: row.get("email"),
         full_name: row.get("full_name"),
         phone_number: row.get("phone_number"),
+        avatar_url: row.get("avatar_url"),
     }))
 }
 
@@ -487,7 +493,7 @@ pub async fn reset_password_handler(
              last_failed_at = NULL, 
              updated_at = NOW() 
          WHERE email = $2 
-         RETURNING id, full_name, phone_number"
+         RETURNING id, full_name, phone_number, avatar_url"
     )
     .bind(&hashed_pw)
     .bind(&email)
@@ -515,6 +521,8 @@ pub async fn reset_password_handler(
     let full_name: String = user.get("full_name");
     let phone_number: String = user.get("phone_number");
 
+    let avatar_url: Option<String> = user.get("avatar_url");
+
     // Cấp ngay JWT token để người dùng đăng nhập ngay lập tức
     let token = create_jwt(&user_id, &email, &state.config.jwt_secret, 30)?;
 
@@ -529,6 +537,8 @@ pub async fn reset_password_handler(
             email,
             full_name,
             phone_number,
+
+        avatar_url,
         }),
     }))
 }

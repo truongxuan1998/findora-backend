@@ -24,6 +24,8 @@ pub struct UserResponse {
     pub email: String,
     pub full_name: String,
     pub phone_number: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
