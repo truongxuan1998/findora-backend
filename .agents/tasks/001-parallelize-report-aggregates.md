@@ -32,11 +32,11 @@ Ba query không phụ thuộc nhau về dữ liệu → đang tốn **3 round-tr
 6. Lưu ý: `pool` là `&sqlx::PgPool`; 3 future dùng chung `&pool`, các tham số bind (`start_millis`, `end_millis`, `user_id`, `wallet_id`) là borrow bất biến → an toàn khi poll đồng thời.
 
 ## 4. Tiêu chí nghiệm thu (Acceptance Criteria)
-- [ ] 3 query totals/expense/income chạy qua `tokio::try_join!` (không còn 3 `await` tuần tự)
-- [ ] Kết quả JSON của `/api/reports/monthly`, `/summary`, `/statistics` **giống hệt** trước khi sửa (same totals, breakdown, time-series)
-- [ ] `tests/report_statistics_tests.rs` xanh
-- [ ] SQL 3 query không bị thay đổi một ký tự nào
-- [ ] Không clippy warning mới
+- [x] 3 query totals/expense/income chạy qua `tokio::try_join!` (không còn 3 `await` tuần tự)
+- [x] Kết quả JSON của `/api/reports/monthly`, `/summary`, `/statistics` **giống hệt** trước khi sửa (same totals, breakdown, time-series)
+- [x] `tests/report_statistics_tests.rs` xanh
+- [x] SQL 3 query không bị thay đổi một ký tự nào
+- [x] Không clippy warning mới
 
 ## 5. Cổng kiểm chứng (bắt buộc chạy, phải xanh)
 ```bash
@@ -45,7 +45,7 @@ cargo build && cargo clippy -- -D warnings && cargo test && graphify update .
 Gợi ý so sánh thủ công: gọi cùng một request report trước/sau khi sửa, `diff` hai JSON trả về phải rỗng.
 
 ## 6. Bàn giao
-- **Branch:** `perf/parallel-report-aggregates`
-- **Commit/PR:** `0ff7a9f` — đã merge vào `main`
-- **Ghi chú của implementer:** Chuyển 3 query thành future, gộp `tokio::try_join!`.
+- **Branch:** `perf/parallel-report-aggregates` (đã merge & xoá)
+- **Commit/PR:** `0ff7a9f` — cherry-pick vào `main`
+- **Ghi chú của implementer:** Đã chuyển 3 query totals, expense breakdown và income breakdown sang future độc lập và gộp chạy đồng thời bằng `tokio::try_join!`. Giữ nguyên 100% cú pháp SQL và thứ tự tính toán `total_income`/`total_expense` trước mapping percentage. Cổng kiểm chứng pass toàn bộ.
 - **Nhận xét review của Claude:** PASS. Đã kiểm: SQL 3 query giữ nguyên, dùng `try_join!`, `total_income/total_expense` tính trước breakdown, `tx_points` vẫn chạy sau. `main` xanh (build/clippy/test). Đóng DONE.

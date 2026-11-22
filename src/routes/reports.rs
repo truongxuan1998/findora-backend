@@ -399,8 +399,8 @@ async fn fetch_report_aggregates(
     _lang: Language,
     fetch_tx_points: bool,
 ) -> AppResult<(i64, i64, Vec<CategorySummary>, Vec<CategorySummary>, Vec<(i64, String, i64)>)> {
-    // 1. Totals
-    let totals_rows = sqlx::query(
+    // 1. Chuẩn bị 3 truy vấn độc lập chạy song song qua tokio::try_join!
+    let totals_q = sqlx::query(
         "SELECT t.tx_type, COALESCE(SUM(t.amount), 0)::BIGINT as sum
          FROM findora.transactions t
          INNER JOIN findora.wallets w ON t.wallet_id = w.id
@@ -415,25 +415,9 @@ async fn fetch_report_aggregates(
     .bind(end_millis)
     .bind(user_id)
     .bind(wallet_id)
-    .fetch_all(pool)
-    .await
-    .map_err(AppError::Database)?;
+    .fetch_all(pool);
 
-    let mut total_income: i64 = 0;
-    let mut total_expense: i64 = 0;
-
-    for r in totals_rows {
-        let t: String = r.get("tx_type");
-        let s: i64 = r.get("sum");
-        match t.as_str() {
-            "INCOME" => total_income = s,
-            "EXPENSE" => total_expense = s,
-            _ => {}
-        }
-    }
-
-    // 2. Expense Breakdown
-    let expense_rows = sqlx::query(
+    let expense_q = sqlx::query(
         "SELECT c.id as cat_id, c.name as cat_name, c.name_en as cat_name_en, COALESCE(SUM(t.amount), 0)::BIGINT as total_cat
          FROM findora.transactions t
          INNER JOIN findora.wallets w ON t.wallet_id = w.id
@@ -451,9 +435,43 @@ async fn fetch_report_aggregates(
     .bind(end_millis)
     .bind(user_id)
     .bind(wallet_id)
-    .fetch_all(pool)
-    .await
-    .map_err(AppError::Database)?;
+    .fetch_all(pool);
+
+    let income_q = sqlx::query(
+        "SELECT c.id as cat_id, c.name as cat_name, c.name_en as cat_name_en, COALESCE(SUM(t.amount), 0)::BIGINT as total_cat
+         FROM findora.transactions t
+         INNER JOIN findora.wallets w ON t.wallet_id = w.id
+         INNER JOIN findora.categories c ON t.category_id = c.id
+         WHERE t.deleted_at IS NULL
+           AND t.tx_type = 'INCOME'
+           AND t.timestamp >= $1 
+           AND t.timestamp < $2
+           AND ($3::TEXT IS NULL OR w.user_id = $3)
+           AND ($4::TEXT IS NULL OR t.wallet_id = $4)
+         GROUP BY c.id, c.name, c.name_en
+         ORDER BY total_cat DESC"
+    )
+    .bind(start_millis)
+    .bind(end_millis)
+    .bind(user_id)
+    .bind(wallet_id)
+    .fetch_all(pool);
+
+    let (totals_rows, expense_rows, income_rows) =
+        tokio::try_join!(totals_q, expense_q, income_q).map_err(AppError::Database)?;
+
+    let mut total_income: i64 = 0;
+    let mut total_expense: i64 = 0;
+
+    for r in totals_rows {
+        let t: String = r.get("tx_type");
+        let s: i64 = r.get("sum");
+        match t.as_str() {
+            "INCOME" => total_income = s,
+            "EXPENSE" => total_expense = s,
+            _ => {}
+        }
+    }
 
     let expense_breakdown: Vec<CategorySummary> = expense_rows
         .into_iter()
@@ -477,29 +495,6 @@ async fn fetch_report_aggregates(
             }
         })
         .collect();
-
-    // 3. Income Breakdown
-    let income_rows = sqlx::query(
-        "SELECT c.id as cat_id, c.name as cat_name, c.name_en as cat_name_en, COALESCE(SUM(t.amount), 0)::BIGINT as total_cat
-         FROM findora.transactions t
-         INNER JOIN findora.wallets w ON t.wallet_id = w.id
-         INNER JOIN findora.categories c ON t.category_id = c.id
-         WHERE t.deleted_at IS NULL
-           AND t.tx_type = 'INCOME'
-           AND t.timestamp >= $1 
-           AND t.timestamp < $2
-           AND ($3::TEXT IS NULL OR w.user_id = $3)
-           AND ($4::TEXT IS NULL OR t.wallet_id = $4)
-         GROUP BY c.id, c.name, c.name_en
-         ORDER BY total_cat DESC"
-    )
-    .bind(start_millis)
-    .bind(end_millis)
-    .bind(user_id)
-    .bind(wallet_id)
-    .fetch_all(pool)
-    .await
-    .map_err(AppError::Database)?;
 
     let income_breakdown: Vec<CategorySummary> = income_rows
         .into_iter()
