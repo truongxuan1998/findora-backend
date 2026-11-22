@@ -29,7 +29,7 @@ pub async fn monthly_report_handler(
 ) -> AppResult<Json<MonthlyReportResponse>> {
     let vn_offset = FixedOffset::east_opt(7 * 3600).unwrap();
     let now_vn = Utc::now().with_timezone(&vn_offset);
-    let year = query.year.unwrap_or_else(|| now_vn.year());
+    let year = query.year.unwrap_or_else(|| now_vn.year()).clamp(2000, 2100);
     let month = query.month.unwrap_or_else(|| now_vn.month()).clamp(1, 12);
 
     let start_date = NaiveDate::from_ymd_opt(year, month, 1)
@@ -72,7 +72,7 @@ pub async fn monthly_report_handler(
 
     let (total_income, total_expense, expense_breakdown, income_breakdown, _) =
         fetch_report_aggregates(
-            &*state.pool,
+            &state.pool,
             user_id.as_deref(),
             query.wallet_id.as_deref(),
             start_millis,
@@ -123,6 +123,7 @@ pub async fn summary_report_handler(
     };
 
     if let Some(y) = query.year {
+        let y = y.clamp(2000, 2100);
         ref_date = NaiveDate::from_ymd_opt(y, query.month.unwrap_or(ref_date.month()), ref_date.day().min(28))
             .unwrap_or(ref_date);
     } else if let Some(m) = query.month {
@@ -333,7 +334,7 @@ pub async fn summary_report_handler(
 
     let (total_income, total_expense, expense_breakdown, income_breakdown, tx_rows) =
         fetch_report_aggregates(
-            &*state.pool,
+            &state.pool,
             user_id.as_deref(),
             query.wallet_id.as_deref(),
             start_millis,
@@ -565,7 +566,7 @@ pub async fn category_report_handler(
     let vn_offset = FixedOffset::east_opt(7 * 3600).unwrap();
     let now_vn = Utc::now().with_timezone(&vn_offset);
 
-    let year = query.year.unwrap_or_else(|| now_vn.year());
+    let year = query.year.unwrap_or_else(|| now_vn.year()).clamp(2000, 2100);
     let month = query.month.unwrap_or(12).clamp(1, 12);
     let months_count = query.months_count.unwrap_or(12).clamp(1, 12) as i32;
 

@@ -173,7 +173,7 @@ pub async fn translate_transactions_handler(
 
     let translations: Vec<TransactionNoteTranslation> = items
         .into_iter()
-        .zip(translated_notes.into_iter())
+        .zip(translated_notes)
         .map(|((id, note), translated)| TransactionNoteTranslation {
             id,
             original_note: note,

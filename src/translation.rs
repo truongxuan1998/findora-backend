@@ -176,7 +176,7 @@ impl TranslationService {
     }
 
     /// Tự động phát hiện cặp ngôn ngữ nguồn và đích
-    pub fn detect_languages<'a>(&self, text: &str, requested_target: Option<&'a str>) -> (&'static str, &'static str) {
+    pub fn detect_languages(&self, text: &str, requested_target: Option<&str>) -> (&'static str, &'static str) {
         let is_vietnamese = text.chars().any(|c| {
             matches!(
                 c,
@@ -317,17 +317,28 @@ impl TranslationService {
         trimmed.to_string()
     }
 
-    /// Dịch hàng loạt danh sách văn bản (xử lý song song, giữ nguyên thứ tự)
+    /// Số request dịch tối đa chạy đồng thời (bound concurrency để tránh bị MyMemory rate-limit
+    /// và tránh cạn file descriptor / áp lực RAM khi batch lớn).
+    const MAX_TRANSLATE_CONCURRENCY: usize = 8;
+
+    /// Dịch hàng loạt danh sách văn bản (song song có giới hạn, giữ nguyên thứ tự đầu vào)
     pub async fn translate_batch(
         &self,
         texts: &[String],
         target: &str,
         source: Option<&str>,
     ) -> Vec<String> {
-        let futures_iter = texts
-            .iter()
-            .map(|text| self.translate(text, target, source));
-        futures::future::join_all(futures_iter).await
+        // Chia thành từng nhóm MAX_TRANSLATE_CONCURRENCY phần tử, mỗi nhóm dịch song song (join_all).
+        // Giữ nguyên thứ tự đầu vào, giới hạn số request đồng thời tới MyMemory API.
+        let mut results = Vec::with_capacity(texts.len());
+        for chunk in texts.chunks(Self::MAX_TRANSLATE_CONCURRENCY) {
+            let part = futures::future::join_all(
+                chunk.iter().map(|text| self.translate(text, target, source)),
+            )
+            .await;
+            results.extend(part);
+        }
+        results
     }
 }
 

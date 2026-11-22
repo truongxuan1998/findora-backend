@@ -169,7 +169,7 @@ pub fn map_apple_model_identifier(raw: &str) -> Option<&'static str> {
 
 fn parse_device_from_ua(ua: &str) -> String {
     // 1. Kiểm tra mã định danh phần cứng trực tiếp trong User-Agent (e.g. iPhone16,1 hoặc iPhone17,2)
-    for part in ua.split(|c: char| c == ' ' || c == ';' || c == '(' || c == ')' || c == '/' || c == '_') {
+    for part in ua.split([' ', ';', '(', ')', '/', '_']) {
         let trimmed = part.trim();
         if trimmed.starts_with("iPhone") && trimmed.contains(',') {
             if let Some(mapped) = map_apple_model_identifier(trimmed) {

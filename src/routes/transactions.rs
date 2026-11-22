@@ -66,7 +66,7 @@ pub async fn list_transactions_handler(
     if let Some(ref target) = query.translate_to {
         let notes: Vec<String> = txs.iter().map(|t| t.note.clone()).collect();
         let translated = state.translation.translate_batch(&notes, target, None).await;
-        for (item, tr) in txs.iter_mut().zip(translated.into_iter()) {
+        for (item, tr) in txs.iter_mut().zip(translated) {
             if !item.note.trim().is_empty() {
                 item.translated_note = Some(tr);
             }

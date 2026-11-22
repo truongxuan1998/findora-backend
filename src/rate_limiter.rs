@@ -63,7 +63,7 @@ impl IpRateLimiter {
             .as_secs();
 
         // Định kỳ mỗi 1.000 requests thì dọn dẹp các IP đã hết hạn để tiết kiệm RAM
-        if self.request_counter.fetch_add(1, Ordering::Relaxed) % 1000 == 0 {
+        if self.request_counter.fetch_add(1, Ordering::Relaxed).is_multiple_of(1000) {
             let state_clone = self.state.clone();
             tokio::spawn(async move {
                 let mut map = state_clone.write().await;
@@ -105,6 +105,12 @@ impl IpRateLimiter {
             remaining,
             reset_at: entry.reset_at,
         })
+    }
+}
+
+impl Default for IpRateLimiter {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
