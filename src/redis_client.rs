@@ -163,6 +163,56 @@ impl RedisService {
         None
     }
 
+    /// Lấy nhiều key cùng lúc (MGET) — trả về Vec cùng độ dài & thứ tự với `keys`,
+    /// phần tử None nếu key không tồn tại. Cắt số round-trip khi đọc cache hàng loạt.
+    pub async fn mget(&self, keys: &[String]) -> Vec<Option<String>> {
+        if keys.is_empty() {
+            return Vec::new();
+        }
+
+        if let Some(mut mgr) = self.manager.clone() {
+            let res: Result<Vec<Option<String>>, _> =
+                redis::cmd("MGET").arg(keys).query_async(&mut mgr).await;
+            if let Ok(vals) = res {
+                if vals.len() == keys.len() {
+                    return vals;
+                }
+            }
+        }
+
+        if let (Some(url), Some(token)) = (&self.rest_url, &self.rest_token) {
+            let mut cmd = vec![serde_json::json!("MGET")];
+            for k in keys {
+                cmd.push(serde_json::json!(k));
+            }
+            if let Ok(resp) = self
+                .http_client
+                .post(url)
+                .header("Authorization", format!("Bearer {}", token))
+                .header("Content-Type", "application/json")
+                .json(&cmd)
+                .send()
+                .await
+            {
+                if resp.status().is_success() {
+                    if let Ok(json) = resp.json::<Value>().await {
+                        if let Some(arr) = json.get("result").and_then(|v| v.as_array()) {
+                            if arr.len() == keys.len() {
+                                return arr
+                                    .iter()
+                                    .map(|v| v.as_str().map(|s| s.to_string()))
+                                    .collect();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Không đọc được (Redis tắt/lỗi) → coi như toàn bộ cache miss
+        vec![None; keys.len()]
+    }
+
     /// Lưu giá trị có thời gian sống (TTL theo giây)
     pub async fn set_ex(&self, key: &str, value: &str, ttl_secs: u64) -> bool {
         if let Some(mut mgr) = self.manager.clone() {

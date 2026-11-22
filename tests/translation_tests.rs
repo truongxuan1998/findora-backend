@@ -163,6 +163,14 @@ async fn test_translate_api_endpoints_and_transaction_sync() {
     .await
     .unwrap();
 
+    // Dọn giao dịch cũ của ví test để test tất định (tránh tích luỹ qua nhiều lần chạy
+    // làm giao dịch mới bị đẩy khỏi LIMIT 10 khi các bản ghi cùng timestamp).
+    let _ = sqlx::query("DELETE FROM findora.transactions WHERE wallet_id = $1")
+        .bind(test_wallet_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
     let auth = AuthenticatedUser {
         user_id: test_user_id.to_string(),
         email: test_email.to_string(),

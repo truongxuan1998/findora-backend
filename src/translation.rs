@@ -224,14 +224,9 @@ impl TranslationService {
         }
     }
 
-    /// Dịch đơn lẻ một chuỗi văn bản (có hỗ trợ cache Redis & từ điển chuyên ngành)
-    pub async fn translate(&self, text: &str, target: &str, source: Option<&str>) -> String {
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
-            return String::new();
-        }
-
-        let (src_lang, tgt_lang) = if let Some(s) = source {
+    /// Phân giải cặp ngôn ngữ nguồn → đích.
+    fn resolve_langs(&self, trimmed: &str, target: &str, source: Option<&str>) -> (&'static str, &'static str) {
+        if let Some(s) = source {
             let s_lower = s.trim().to_lowercase();
             let t_lower = target.trim().to_lowercase();
             let final_s = if s_lower == "vi" { "vi" } else { "en" };
@@ -239,36 +234,22 @@ impl TranslationService {
             (final_s, final_t)
         } else {
             self.detect_languages(trimmed, Some(target))
-        };
-
-        if src_lang == tgt_lang {
-            return trimmed.to_string();
         }
+    }
 
-        let normalized_key = trimmed.to_lowercase();
-
-        // 1. Kiểm tra từ điển tài chính địa phương (0ms, không tốn network)
+    /// Tra từ điển tài chính địa phương (0ms, không network). `normalized_key` phải viết thường.
+    fn local_translate(&self, normalized_key: &str, src_lang: &str, tgt_lang: &str) -> Option<String> {
         if src_lang == "vi" && tgt_lang == "en" {
-            if let Some(&found) = self.vi_to_en.get(normalized_key.as_str()) {
-                return found.to_string();
-            }
+            self.vi_to_en.get(normalized_key).map(|s| s.to_string())
         } else if src_lang == "en" && tgt_lang == "vi" {
-            // Tra cứu O(1) bằng key tiếng Anh viết thường (normalized_key đã lowercase)
-            if let Some(&vi_term) = self.en_to_vi.get(&normalized_key) {
-                return vi_term.to_string();
-            }
+            self.en_to_vi.get(normalized_key).map(|s| s.to_string())
+        } else {
+            None
         }
+    }
 
-        // 2. Kiểm tra Redis Cache
-        let cache_key = format!("findora:translate:{}:{}:{}", src_lang, tgt_lang, normalized_key);
-        if let Some(cached) = self.redis.get(&cache_key).await {
-            if !cached.trim().is_empty() {
-                debug!(text = %trimmed, cached = %cached, "Cache Hit bản dịch");
-                return cached;
-            }
-        }
-
-        // 3. Gọi Translation Engine API (MyMemory API)
+    /// Gọi MyMemory API dịch 1 chuỗi, lưu cache nếu thành công; fallback giữ nguyên gốc.
+    async fn translate_via_api(&self, trimmed: &str, src_lang: &str, tgt_lang: &str, cache_key: &str) -> String {
         let langpair = format!("{}|{}", src_lang, tgt_lang);
         let api_url = "https://api.mymemory.translated.net/get";
 
@@ -287,9 +268,7 @@ impl TranslationService {
                             let clean_trans = decode_html_entities(&raw_trans);
                             if !clean_trans.is_empty() && !clean_trans.starts_with("MYMEMORY WARNING:") {
                                 // Lưu cache Redis trong 30 ngày (86400 * 30 giây)
-                                self.redis
-                                    .set_ex(&cache_key, &clean_trans, 86400 * 30)
-                                    .await;
+                                self.redis.set_ex(cache_key, &clean_trans, 86400 * 30).await;
                                 return clean_trans;
                             }
                         }
@@ -297,23 +276,47 @@ impl TranslationService {
                 }
             }
             Ok(res) => {
-                warn!(
-                    status = %res.status(),
-                    text = %trimmed,
-                    "Translation API trả mã lỗi"
-                );
+                warn!(status = %res.status(), text = %trimmed, "Translation API trả mã lỗi");
             }
             Err(e) => {
-                warn!(
-                    error = %e,
-                    text = %trimmed,
-                    "Lỗi kết nối tới Translation API (sử dụng fallback)"
-                );
+                warn!(error = %e, text = %trimmed, "Lỗi kết nối tới Translation API (sử dụng fallback)");
             }
         }
 
-        // 4. Fallback an toàn: Giữ nguyên văn bản gốc
+        // Fallback an toàn: giữ nguyên văn bản gốc
         trimmed.to_string()
+    }
+
+    /// Dịch đơn lẻ một chuỗi văn bản (từ điển → cache Redis → MyMemory API).
+    pub async fn translate(&self, text: &str, target: &str, source: Option<&str>) -> String {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return String::new();
+        }
+
+        let (src_lang, tgt_lang) = self.resolve_langs(trimmed, target, source);
+        if src_lang == tgt_lang {
+            return trimmed.to_string();
+        }
+
+        let normalized_key = trimmed.to_lowercase();
+
+        // 1. Từ điển địa phương
+        if let Some(hit) = self.local_translate(&normalized_key, src_lang, tgt_lang) {
+            return hit;
+        }
+
+        // 2. Redis cache
+        let cache_key = format!("findora:translate:{}:{}:{}", src_lang, tgt_lang, normalized_key);
+        if let Some(cached) = self.redis.get(&cache_key).await {
+            if !cached.trim().is_empty() {
+                debug!(text = %trimmed, cached = %cached, "Cache Hit bản dịch");
+                return cached;
+            }
+        }
+
+        // 3 + 4. API + fallback
+        self.translate_via_api(trimmed, src_lang, tgt_lang, &cache_key).await
     }
 
     /// Số request dịch tối đa chạy đồng thời (bound concurrency để tránh bị MyMemory rate-limit
@@ -343,19 +346,58 @@ impl TranslationService {
             })
             .collect();
 
-        // 2. Dịch các chuỗi duy nhất theo nhóm MAX_TRANSLATE_CONCURRENCY (song song có giới hạn).
-        let mut translated_unique: Vec<String> = Vec::with_capacity(unique.len());
-        for chunk in unique.chunks(Self::MAX_TRANSLATE_CONCURRENCY) {
-            let part = futures::future::join_all(
-                chunk.iter().map(|&text| self.translate(text, target, source)),
-            )
-            .await;
-            translated_unique.extend(part);
+        // 2. Phân giải từng unique: kết quả tức thì (same-lang/từ điển) hoặc cần tra cache Redis.
+        let mut translated_unique: Vec<Option<String>> = vec![None; unique.len()];
+        // Mỗi phần tử cần tra: (chỉ số trong unique, trimmed, src, tgt, cache_key)
+        let mut lookups: Vec<(usize, String, &'static str, &'static str, String)> = Vec::new();
+
+        for (uidx, &note) in unique.iter().enumerate() {
+            let trimmed = note.trim();
+            if trimmed.is_empty() {
+                translated_unique[uidx] = Some(String::new());
+                continue;
+            }
+            let (src, tgt) = self.resolve_langs(trimmed, target, source);
+            if src == tgt {
+                translated_unique[uidx] = Some(trimmed.to_string());
+                continue;
+            }
+            let normalized = trimmed.to_lowercase();
+            if let Some(hit) = self.local_translate(&normalized, src, tgt) {
+                translated_unique[uidx] = Some(hit);
+                continue;
+            }
+            let cache_key = format!("findora:translate:{}:{}:{}", src, tgt, normalized);
+            lookups.push((uidx, trimmed.to_string(), src, tgt, cache_key));
         }
 
-        // 3. Map ngược về đúng thứ tự & số lượng đầu vào.
-        let results: Vec<String> = slots.iter().map(|&idx| translated_unique[idx].clone()).collect();
-        results
+        // 3. MGET toàn bộ cache key trong 1 round-trip; tách hit / miss.
+        let keys: Vec<String> = lookups.iter().map(|l| l.4.clone()).collect();
+        let cached = self.redis.mget(&keys).await;
+
+        let mut misses: Vec<(usize, String, &'static str, &'static str, String)> = Vec::new();
+        for (l, cv) in lookups.into_iter().zip(cached) {
+            match cv {
+                Some(v) if !v.trim().is_empty() => translated_unique[l.0] = Some(v),
+                _ => misses.push(l),
+            }
+        }
+
+        // 4. Gọi API cho các cache miss, song song có giới hạn concurrency.
+        for chunk in misses.chunks(Self::MAX_TRANSLATE_CONCURRENCY) {
+            let results = futures::future::join_all(
+                chunk.iter().map(|m| self.translate_via_api(&m.1, m.2, m.3, &m.4)),
+            )
+            .await;
+            for (m, res) in chunk.iter().zip(results) {
+                translated_unique[m.0] = Some(res);
+            }
+        }
+
+        // 5. Map ngược về đúng thứ tự & số lượng đầu vào.
+        let translated_unique: Vec<String> =
+            translated_unique.into_iter().map(|o| o.unwrap_or_default()).collect();
+        slots.iter().map(|&idx| translated_unique[idx].clone()).collect()
     }
 }
 
