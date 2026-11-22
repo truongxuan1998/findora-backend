@@ -1,3 +1,8 @@
+## Permissions & Repository Scope
+
+- **findora-backend**: Authorized to commit and push changes directly to `origin/main` when requested.
+- **findora-app**: STRICTLY REQUIRES EXPLICIT USER APPROVAL. Do NOT modify, commit, push, or distribute `findora-app` without explicit user confirmation first.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
