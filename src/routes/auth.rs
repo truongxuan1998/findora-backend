@@ -39,6 +39,22 @@ pub fn validate_password(password: &str, lang: Language) -> AppResult<()> {
     Ok(())
 }
 
+/// Hash mật khẩu bằng bcrypt trên blocking thread pool (bcrypt là CPU-bound ~250ms,
+/// chạy trực tiếp trong async handler sẽ block tokio worker thread).
+async fn hash_password_async(password: String) -> AppResult<String> {
+    tokio::task::spawn_blocking(move || hash(&password, DEFAULT_COST))
+        .await
+        .map_err(|e| AppError::Internal(format!("Lỗi thread mã hóa mật khẩu: {}", e)))?
+        .map_err(|e| AppError::Internal(format!("Lỗi mã hóa mật khẩu: {}", e)))
+}
+
+/// Verify mật khẩu bằng bcrypt trên blocking thread pool
+async fn verify_password_async(password: String, hash_str: String) -> bool {
+    tokio::task::spawn_blocking(move || verify(&password, &hash_str).unwrap_or(false))
+        .await
+        .unwrap_or(false)
+}
+
 pub async fn register_handler(
     State(state): State<Arc<AppState>>,
     lang: Language,
@@ -64,8 +80,7 @@ pub async fn register_handler(
 
     validate_password(&payload.password, lang)?;
 
-    let hashed_pw = hash(&payload.password, DEFAULT_COST)
-        .map_err(|e| AppError::Internal(format!("Lỗi mã hóa mật khẩu: {}", e)))?;
+    let hashed_pw = hash_password_async(payload.password.clone()).await?;
 
     let user_id = format!("usr_{}", Uuid::new_v4().simple());
     let phone = payload.phone_number.unwrap_or_default().trim().to_string();
@@ -188,7 +203,7 @@ pub async fn login_handler(
         }
     }
 
-    let is_valid = verify(&payload.password, &pw_hash).unwrap_or(false);
+    let is_valid = verify_password_async(payload.password.clone(), pw_hash.clone()).await;
 
     // 2. Trường hợp Mật khẩu SAI
     if !is_valid {
@@ -518,9 +533,8 @@ pub async fn reset_password_handler(
         ));
     }
 
-    // 3. Hash mật khẩu mới bằng bcrypt
-    let hashed_pw = hash(&payload.new_password, DEFAULT_COST)
-        .map_err(|e| AppError::Internal(format!("Lỗi mã hóa mật khẩu: {}", e)))?;
+    // 3. Hash mật khẩu mới bằng bcrypt (trên blocking pool)
+    let hashed_pw = hash_password_async(payload.new_password.clone()).await?;
 
     let mut tx = state.pool.begin().await.map_err(AppError::Database)?;
 

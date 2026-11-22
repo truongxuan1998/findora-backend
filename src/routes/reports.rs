@@ -572,6 +572,24 @@ pub async fn category_report_handler(
 
     let user_id = Some(auth.user_id);
 
+    // Redis cache (TTL 10 phút) — tương tự các báo cáo khác
+    // user_id đứng đầu để khớp pattern invalidation "findora:cache:report:{user}*" khi ghi giao dịch
+    let cache_key = format!(
+        "findora:cache:report:{}:cat:{}:{}:{}:{}:{}:{}",
+        user_id.as_deref().unwrap_or("anon"),
+        category_id,
+        year,
+        month,
+        months_count,
+        query.wallet_id.as_deref().unwrap_or("all"),
+        lang.code()
+    );
+    if let Some(cached) = state.redis.get(&cache_key).await {
+        if let Ok(resp) = serde_json::from_str::<CategoryReportResponse>(&cached) {
+            return Ok(Json(resp));
+        }
+    }
+
     // Fetch category info
     let cat_row = sqlx::query(
         "SELECT id, name, name_en, icon, color, type FROM findora.categories WHERE id = $1"
@@ -608,58 +626,81 @@ pub async fn category_report_handler(
     }
     target_months.reverse();
 
+    // Khoảng thời gian bao trùm toàn bộ các tháng cần thống kê (tháng cũ nhất -> hết tháng được chọn)
+    let (first_y, first_m) = target_months[0];
+    let range_start = NaiveDate::from_ymd_opt(first_y, first_m, 1)
+        .unwrap()
+        .and_hms_opt(0, 0, 0)
+        .unwrap()
+        .and_local_timezone(vn_offset)
+        .unwrap()
+        .timestamp_millis();
+    let (sel_next_y, sel_next_m) = if month == 12 { (year + 1, 1) } else { (year, month + 1) };
+    let range_end = NaiveDate::from_ymd_opt(sel_next_y, sel_next_m, 1)
+        .unwrap()
+        .and_hms_opt(0, 0, 0)
+        .unwrap()
+        .and_local_timezone(vn_offset)
+        .unwrap()
+        .timestamp_millis();
+
+    // MỘT query duy nhất gom nhóm theo (năm, tháng) theo múi giờ Việt Nam (thay cho N+1 query)
+    let rows = sqlx::query(
+        "SELECT EXTRACT(YEAR FROM to_timestamp(t.timestamp / 1000.0) AT TIME ZONE 'Asia/Ho_Chi_Minh')::INT AS y,
+                EXTRACT(MONTH FROM to_timestamp(t.timestamp / 1000.0) AT TIME ZONE 'Asia/Ho_Chi_Minh')::INT AS m,
+                COALESCE(SUM(t.amount), 0)::BIGINT AS sum
+         FROM findora.transactions t
+         INNER JOIN findora.wallets w ON t.wallet_id = w.id
+         WHERE t.deleted_at IS NULL
+           AND t.category_id = $1
+           AND t.timestamp >= $2
+           AND t.timestamp < $3
+           AND ($4::TEXT IS NULL OR w.user_id = $4)
+           AND ($5::TEXT IS NULL OR t.wallet_id = $5)
+         GROUP BY y, m"
+    )
+    .bind(&category_id)
+    .bind(range_start)
+    .bind(range_end)
+    .bind(&user_id)
+    .bind(&query.wallet_id)
+    .fetch_all(&*state.pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    // Map (năm, tháng) -> tổng tiền
+    let sums: Vec<(i32, u32, i64)> = rows
+        .iter()
+        .map(|r| (r.get::<i32, _>("y"), r.get::<i32, _>("m") as u32, r.get::<i64, _>("sum")))
+        .collect();
+
     let mut monthly_history = Vec::with_capacity(target_months.len());
     let mut current_month_total: i64 = 0;
-
     for (y, m) in target_months {
-        let m_start = NaiveDate::from_ymd_opt(y, m, 1).unwrap();
-        let m_end = if m == 12 {
-            NaiveDate::from_ymd_opt(y + 1, 1, 1).unwrap()
-        } else {
-            NaiveDate::from_ymd_opt(y, m + 1, 1).unwrap()
-        };
-        let s_dt = m_start.and_hms_opt(0, 0, 0).unwrap().and_local_timezone(vn_offset).unwrap();
-        let e_dt = m_end.and_hms_opt(0, 0, 0).unwrap().and_local_timezone(vn_offset).unwrap();
+        let total = sums
+            .iter()
+            .find(|(sy, sm, _)| *sy == y && *sm == m)
+            .map(|(_, _, s)| *s)
+            .unwrap_or(0);
 
-        let row = sqlx::query(
-            "SELECT COALESCE(SUM(t.amount), 0)::BIGINT as sum
-             FROM findora.transactions t
-             INNER JOIN findora.wallets w ON t.wallet_id = w.id
-             WHERE t.deleted_at IS NULL
-               AND t.category_id = $1
-               AND t.timestamp >= $2
-               AND t.timestamp < $3
-               AND ($4::TEXT IS NULL OR w.user_id = $4)
-               AND ($5::TEXT IS NULL OR t.wallet_id = $5)"
-        )
-        .bind(&category_id)
-        .bind(s_dt.timestamp_millis())
-        .bind(e_dt.timestamp_millis())
-        .bind(&user_id)
-        .bind(&query.wallet_id)
-        .fetch_one(&*state.pool)
-        .await
-        .map_err(AppError::Database)?;
-
-        let sum: i64 = row.get("sum");
         let label = match lang {
             Language::Vi => format!("T{}", m),
             Language::En => format!("M{}", m),
         };
 
         if y == year && m == month {
-            current_month_total = sum;
+            current_month_total = total;
         }
 
         monthly_history.push(CategoryMonthStat {
             year: y,
             month: m,
             label,
-            total: sum,
+            total,
         });
     }
 
-    Ok(Json(CategoryReportResponse {
+    let response = CategoryReportResponse {
         category_id,
         category_name: display_name,
         category_name_en: cat_name_en,
@@ -670,5 +711,11 @@ pub async fn category_report_handler(
         selected_month: month,
         current_month_total,
         monthly_history,
-    }))
+    };
+
+    if let Ok(json_str) = serde_json::to_string(&response) {
+        state.redis.set_ex(&cache_key, &json_str, 600).await;
+    }
+
+    Ok(Json(response))
 }
