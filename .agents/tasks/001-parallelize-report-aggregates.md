@@ -3,7 +3,7 @@
 - **Người tạo (architect):** Claude
 - **Người thực hiện (implementer):** Antigravity
 - **Độ ưu tiên:** Trung bình
-- **Trạng thái:** TODO
+- **Trạng thái:** DONE
 
 ## 1. Mục tiêu / Lý do (Why)
 Hàm `fetch_report_aggregates` trong `src/routes/reports.rs` chạy **3 truy vấn độc lập tuần tự** (`await` lần lượt):
@@ -46,6 +46,6 @@ Gợi ý so sánh thủ công: gọi cùng một request report trước/sau khi
 
 ## 6. Bàn giao
 - **Branch:** `perf/parallel-report-aggregates`
-- **Commit/PR:** <điền khi xong>
-- **Ghi chú của implementer:** <điền>
-- **Nhận xét review của Claude:** <để trống>
+- **Commit/PR:** `0ff7a9f` — đã merge vào `main`
+- **Ghi chú của implementer:** Chuyển 3 query thành future, gộp `tokio::try_join!`.
+- **Nhận xét review của Claude:** PASS. Đã kiểm: SQL 3 query giữ nguyên, dùng `try_join!`, `total_income/total_expense` tính trước breakdown, `tx_points` vẫn chạy sau. `main` xanh (build/clippy/test). Đóng DONE.
