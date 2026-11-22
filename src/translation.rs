@@ -10,7 +10,8 @@ pub struct TranslationService {
     redis: Arc<RedisService>,
     http_client: Client,
     vi_to_en: HashMap<&'static str, &'static str>,
-    en_to_vi: HashMap<&'static str, &'static str>,
+    // Key là tiếng Anh viết thường → tra cứu O(1) (thay vì quét tuyến tính)
+    en_to_vi: HashMap<String, &'static str>,
 }
 
 #[derive(Deserialize)]
@@ -164,7 +165,7 @@ impl TranslationService {
 
         for &(vi, en) in pairs {
             vi_to_en.entry(vi).or_insert(en);
-            en_to_vi.entry(en).or_insert(vi);
+            en_to_vi.entry(en.to_lowercase()).or_insert(vi);
         }
 
         Self {
@@ -252,11 +253,9 @@ impl TranslationService {
                 return found.to_string();
             }
         } else if src_lang == "en" && tgt_lang == "vi" {
-            // Tra cứu case-insensitive trong en_to_vi
-            for (&en_term, &vi_term) in &self.en_to_vi {
-                if en_term.eq_ignore_ascii_case(&normalized_key) {
-                    return vi_term.to_string();
-                }
+            // Tra cứu O(1) bằng key tiếng Anh viết thường (normalized_key đã lowercase)
+            if let Some(&vi_term) = self.en_to_vi.get(&normalized_key) {
+                return vi_term.to_string();
             }
         }
 
@@ -321,23 +320,41 @@ impl TranslationService {
     /// và tránh cạn file descriptor / áp lực RAM khi batch lớn).
     const MAX_TRANSLATE_CONCURRENCY: usize = 8;
 
-    /// Dịch hàng loạt danh sách văn bản (song song có giới hạn, giữ nguyên thứ tự đầu vào)
+    /// Dịch hàng loạt danh sách văn bản (dedup + song song có giới hạn, giữ nguyên thứ tự đầu vào)
     pub async fn translate_batch(
         &self,
         texts: &[String],
         target: &str,
         source: Option<&str>,
     ) -> Vec<String> {
-        // Chia thành từng nhóm MAX_TRANSLATE_CONCURRENCY phần tử, mỗi nhóm dịch song song (join_all).
-        // Giữ nguyên thứ tự đầu vào, giới hạn số request đồng thời tới MyMemory API.
-        let mut results = Vec::with_capacity(texts.len());
-        for chunk in texts.chunks(Self::MAX_TRANSLATE_CONCURRENCY) {
+        // 1. Gom các ghi chú DUY NHẤT để mỗi chuỗi chỉ dịch đúng 1 lần — tránh gọi
+        //    trùng API/Redis cho ghi chú lặp (rất phổ biến: "Ăn trưa", "Cà phê"...).
+        let mut unique: Vec<&str> = Vec::new();
+        let mut index_of: HashMap<&str, usize> = HashMap::new();
+        let slots: Vec<usize> = texts
+            .iter()
+            .map(|t| {
+                let key = t.as_str();
+                *index_of.entry(key).or_insert_with(|| {
+                    let idx = unique.len();
+                    unique.push(key);
+                    idx
+                })
+            })
+            .collect();
+
+        // 2. Dịch các chuỗi duy nhất theo nhóm MAX_TRANSLATE_CONCURRENCY (song song có giới hạn).
+        let mut translated_unique: Vec<String> = Vec::with_capacity(unique.len());
+        for chunk in unique.chunks(Self::MAX_TRANSLATE_CONCURRENCY) {
             let part = futures::future::join_all(
-                chunk.iter().map(|text| self.translate(text, target, source)),
+                chunk.iter().map(|&text| self.translate(text, target, source)),
             )
             .await;
-            results.extend(part);
+            translated_unique.extend(part);
         }
+
+        // 3. Map ngược về đúng thứ tự & số lượng đầu vào.
+        let results: Vec<String> = slots.iter().map(|&idx| translated_unique[idx].clone()).collect();
         results
     }
 }
