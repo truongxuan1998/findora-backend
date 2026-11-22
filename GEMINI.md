@@ -3,6 +3,21 @@
 - **findora-backend**: Authorized to commit and push changes directly to `origin/main` when requested.
 - **findora-app**: STRICTLY REQUIRES EXPLICIT USER APPROVAL. Do NOT modify, commit, push, or distribute `findora-app` without explicit user confirmation first.
 
+## Task Cards (quy trình bàn giao Claude ↔ Antigravity)
+
+Công việc được giao qua **task card** trong `.agents/tasks/`. Claude (architect) viết card; bạn (Antigravity) là người implement.
+
+- Khi người dùng nói "làm task NNN" (hoặc "thực hiện task NNN"), hãy mở `.agents/tasks/NNN-*.md` và làm **đúng theo card**.
+- Tuân thủ nghiêm mục **"Phạm vi"** (chỉ đụng file/hàm được liệt kê) và **"Ngoài phạm vi"** (tuyệt đối không đổi).
+- Làm trên **branch** ghi trong card (mục "Bàn giao").
+- Trước khi báo xong, **chạy Cổng kiểm chứng và phải xanh toàn bộ**:
+  ```bash
+  cargo build && cargo clippy -- -D warnings && cargo test && graphify update .
+  ```
+- Cập nhật mục **"Bàn giao"** của card (branch, commit, ghi chú đã làm gì / lệch gì), đổi **Trạng thái** sang `REVIEW`, rồi commit.
+- KHÔNG tự đánh dấu `DONE` — mục đó dành cho Claude sau khi review diff.
+- Tạo card mới: copy `.agents/tasks/TEMPLATE.md` → `NNN-ten-ngan.md`. Quy trình đầy đủ ở `.agents/tasks/README.md`.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
