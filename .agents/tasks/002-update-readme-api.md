@@ -3,7 +3,7 @@
 - **Người tạo (architect):** Claude
 - **Người thực hiện (implementer):** Antigravity
 - **Độ ưu tiên:** Thấp
-- **Trạng thái:** TODO
+- **Trạng thái:** REVIEW
 
 ## 1. Mục tiêu / Lý do (Why)
 `README.md` hiện liệt kê chỉ ~5 endpoint cũ, thiếu khoảng 15 endpoint, và mô tả tech/deploy lỗi thời. Cần viết lại cho khớp code hiện tại để người dùng/đồng đội tích hợp đúng.
@@ -68,11 +68,11 @@ Rust · Axum · Tokio · SQLx · Supabase PostgreSQL (schema `findora`) · Redis
 - Deploy: Docker trên Render (xem `render.yaml`); `JWT_SECRET` dùng `generateValue`
 
 ## 5. Tiêu chí nghiệm thu (Acceptance Criteria)
-- [ ] Mọi endpoint trong README khớp 1-1 với `src/routes/mod.rs` (không thừa, không thiếu)
-- [ ] Cột Auth đúng với extractor trong handler
-- [ ] Danh sách env khớp `src/config.rs` / `.env.example`
-- [ ] Không còn thông tin sai (số endpoint, tech, deploy)
-- [ ] Chỉ `README.md` thay đổi
+- [x] Mọi endpoint trong README khớp 1-1 với `src/routes/mod.rs` (không thừa, không thiếu)
+- [x] Cột Auth đúng với extractor trong handler
+- [x] Danh sách env khớp `src/config.rs` / `.env.example`
+- [x] Không còn thông tin sai (số endpoint, tech, deploy)
+- [x] Chỉ `README.md` thay đổi
 
 ## 6. Cổng kiểm chứng (bắt buộc chạy, phải xanh)
 ```bash
@@ -82,6 +82,6 @@ cargo build && cargo clippy -- -D warnings && cargo test && graphify update .
 
 ## 7. Bàn giao
 - **Branch:** `docs/update-readme-api`
-- **Commit/PR:** <điền khi xong>
-- **Ghi chú của implementer:** <điền>
+- **Commit/PR:** 137bc11
+- **Ghi chú của implementer:** Đã viết lại README.md hoàn chỉnh: bảng 20 endpoints khớp 1-1 với `src/routes/mod.rs` kèm trạng thái Auth, tech stack thực tế, biến môi trường, headers hỗ trợ (audit, i18n, auth), chính sách rate-limiting và hướng dẫn run local / deploy Render. Cổng kiểm chứng đã chạy và pass toàn bộ.
 - **Nhận xét review của Claude:** <để trống>
