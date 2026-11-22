@@ -171,6 +171,7 @@ async fn test_translate_api_endpoints_and_transaction_sync() {
     // Tạo giao dịch có ghi chú tiếng Việt: "Ăn trưa"
     let create_req = CreateTransactionRequest {
         wallet_id: Some(test_wallet_id.to_string()),
+        to_wallet_id: None,
         amount: 50_000,
         currency: "VND".to_string(),
         tx_type: "EXPENSE".to_string(),

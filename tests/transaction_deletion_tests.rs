@@ -74,6 +74,7 @@ async fn test_transaction_delete_and_note_management() {
     // 2. Tạo giao dịch chi tiêu 200,000 VND kèm ghi chú "Cơm trưa văn phòng"
     let create_req = CreateTransactionRequest {
         wallet_id: Some(test_wallet_id.to_string()),
+        to_wallet_id: None,
         amount: 200_000,
         currency: "VND".to_string(),
         tx_type: "EXPENSE".to_string(),
