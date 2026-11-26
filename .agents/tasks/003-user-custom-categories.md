@@ -3,7 +3,7 @@
 - **Người tạo (architect):** Claude
 - **Người thực hiện (implementer):** Antigravity
 - **Độ ưu tiên:** Cao
-- **Trạng thái:** REVIEW
+- **Trạng thái:** DONE
 
 ## 1. Mục tiêu / Lý do (Why)
 Hiện người dùng **không lưu được giao dịch cho danh mục mới tự tạo**. Nguyên nhân:
@@ -99,4 +99,4 @@ cargo build && cargo clippy -- -D warnings && cargo test && graphify update .
 - **Branch:** `feat/user-categories`
 - **Commit/PR:** ccf7c9c
 - **Ghi chú của implementer:** **Đổi contract:** `GET /api/categories` hiện yêu cầu `AuthenticatedUser` (client phải gửi header `Authorization: Bearer <token>`). Đã thêm cột `user_id` + index + FK (`ON DELETE CASCADE`) vào `findora.categories`, tách cache key thành `findora:cache:categories:{user_id}:{lang}`, thêm `POST /api/categories` kèm cache invalidation, map mã PostgreSQL `23503` sang `400 Bad Request`, xác thực `category_id` global hoặc thuộc user trong `create_transaction_handler`, và bổ sung `tests/category_tests.rs`. Cổng kiểm chứng đã chạy và xanh toàn bộ.
-- **Nhận xét review của Claude:** <để trống>
+- **Nhận xét review của Claude:** PASS — đã merge vào `main` (`b8d8f86`). Kiểm: schema self-healing (ADD COLUMN/INDEX IF NOT EXISTS + FK idempotent qua pg_constraint, dữ liệu cũ user_id=NULL an toàn); GET trả global+own với cache key per `{user_id}:{lang}`, POST validate đủ + invalidate cache đúng pattern; map 23503→400 cả ở errors.rs lẫn insert giao dịch; validate quyền sở hữu category khi tạo giao dịch. Test `category_tests` bao phủ đủ: 9 mặc định, validate 400, tạo category→giao dịch lưu + số dư đúng, cô lập user1/user2 (chống rò + chống hijack), category không tồn tại→400. Build/clippy sạch, full suite 16/16 pass. Lưu ý contract: GET /api/categories nay yêu cầu Bearer token (client cần cập nhật).
