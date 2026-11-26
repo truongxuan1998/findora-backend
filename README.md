@@ -37,9 +37,11 @@ Dịch vụ backend hiệu năng cao, tối ưu bộ nhớ cho ứng dụng qu�
 | GET | `/health` | ❌ | Health check kết nối DB Supabase & Redis |
 | POST | `/api/auth/register` | ❌ | Đăng ký tài khoản mới + tạo ví mặc định |
 | POST | `/api/auth/login` | ❌ | Đăng nhập lấy JWT (lockout sau 8 lần sai) |
-| POST | `/api/auth/logout` | ✅ | Đăng xuất người dùng |
+| POST | `/api/auth/logout` | ✅ | Đăng xuất trên thiết bị hiện tại (token vẫn còn hạn để mở lại bằng Face ID) |
+| POST | `/api/auth/logout-all` | ✅ | Đăng xuất mọi thiết bị: thu hồi toàn bộ JWT đã cấp (tăng `token_version`) |
+| POST | `/api/auth/refresh` | ✅ | Đổi token còn hiệu lực lấy token mới hạn 30 ngày (`{ success, message, token }`) |
 | POST | `/api/auth/forgot-password` | ❌ | Gửi OTP 6 số qua email (hết hạn trong 120s) |
-| POST | `/api/auth/reset-password` | ❌ | Đặt lại mật khẩu bằng mã OTP |
+| POST | `/api/auth/reset-password` | ❌ | Đặt lại mật khẩu bằng mã OTP — thu hồi mọi token cũ, trả về token mới |
 | GET | `/api/auth/me` | ✅ | Lấy thông tin user hiện tại |
 | GET | `/api/users/profile` | ✅ | Xem thông tin hồ sơ người dùng |
 | PUT | `/api/users/profile` | ✅ | Cập nhật hồ sơ người dùng |

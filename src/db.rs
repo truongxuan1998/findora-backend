@@ -67,6 +67,8 @@ pub async fn run_schema_and_migrations(pool: &PgPool) -> Result<(), sqlx::Error>
         ALTER TABLE findora.users ADD COLUMN IF NOT EXISTS failed_login_attempts INT NOT NULL DEFAULT 0;
         ALTER TABLE findora.users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ;
         ALTER TABLE findora.users ADD COLUMN IF NOT EXISTS last_failed_at TIMESTAMPTZ;
+        -- Tăng khi đặt lại mật khẩu / đăng xuất mọi thiết bị để thu hồi toàn bộ JWT đã cấp
+        ALTER TABLE findora.users ADD COLUMN IF NOT EXISTS token_version INT NOT NULL DEFAULT 0;
         CREATE INDEX IF NOT EXISTS idx_users_email ON findora.users(email);",
     )
     .execute(pool)

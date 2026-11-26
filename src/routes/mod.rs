@@ -23,6 +23,8 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/auth/register", post(auth::register_handler))
         .route("/api/auth/login", post(auth::login_handler))
         .route("/api/auth/logout", post(auth::logout_handler))
+        .route("/api/auth/logout-all", post(auth::logout_all_handler))
+        .route("/api/auth/refresh", post(auth::refresh_token_handler))
         .route("/api/auth/forgot-password", post(auth::forgot_password_handler))
         .route("/api/auth/reset-password", post(auth::reset_password_handler))
         .route("/api/auth/me", get(auth::me_handler))

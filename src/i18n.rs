@@ -74,6 +74,20 @@ pub fn msg_logout_success(lang: Language) -> &'static str {
     }
 }
 
+pub fn msg_logout_all_success(lang: Language) -> &'static str {
+    match lang {
+        Language::Vi => "Đã đăng xuất khỏi tất cả thiết bị",
+        Language::En => "Signed out of all devices",
+    }
+}
+
+pub fn msg_token_refreshed(lang: Language) -> &'static str {
+    match lang {
+        Language::Vi => "Đã gia hạn phiên đăng nhập",
+        Language::En => "Session renewed",
+    }
+}
+
 pub fn msg_invalid_credentials(lang: Language) -> &'static str {
     match lang {
         Language::Vi => "Email hoặc mật khẩu không chính xác",
