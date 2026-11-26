@@ -156,6 +156,23 @@ pub async fn create_transaction_handler(
         None
     };
 
+    // Kiểm tra category_id là danh mục mặc định (user_id IS NULL) hoặc thuộc sở hữu của user
+    let cat_exists = sqlx::query(
+        "SELECT 1 FROM findora.categories WHERE id = $1 AND (user_id IS NULL OR user_id = $2)",
+    )
+    .bind(&payload.category_id)
+    .bind(&auth.user_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(AppError::Database)?;
+
+    if cat_exists.is_none() {
+        return Err(AppError::BadRequest(match lang {
+            Language::Vi => "Danh mục không tồn tại hoặc không hợp lệ".to_string(),
+            Language::En => "Category does not exist or is invalid".to_string(),
+        }));
+    }
+
     let now_millis = chrono::Utc::now().timestamp_millis();
     let timestamp = payload.timestamp.unwrap_or(now_millis);
     let tx_id = format!("tx_{}", Uuid::new_v4().simple());
@@ -178,7 +195,7 @@ pub async fn create_transaction_handler(
     .bind(now_millis)
     .execute(&mut *tx)
     .await
-    .map_err(AppError::Database)?;
+    .map_err(AppError::from)?;
 
     // 3. Tự động cập nhật current_balance của ví trong cùng 1 ACID transaction
     let source_delta = match tx_type.as_str() {

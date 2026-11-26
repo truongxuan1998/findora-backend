@@ -3,7 +3,7 @@
 - **Người tạo (architect):** Claude
 - **Người thực hiện (implementer):** Antigravity
 - **Độ ưu tiên:** Cao
-- **Trạng thái:** TODO
+- **Trạng thái:** REVIEW
 
 ## 1. Mục tiêu / Lý do (Why)
 Hiện người dùng **không lưu được giao dịch cho danh mục mới tự tạo**. Nguyên nhân:
@@ -81,14 +81,14 @@ SELECT 1 FROM findora.categories WHERE id = $1 AND (user_id IS NULL OR user_id =
 Nếu không có → `AppError::BadRequest("Danh mục không hợp lệ")`. (Tránh dùng danh mục riêng của user khác dù FK vẫn pass.)
 
 ## 4. Tiêu chí nghiệm thu (Acceptance Criteria)
-- [ ] `POST /api/categories` (có token) tạo được danh mục, trả 201 + `CategoryItem` có `id`
-- [ ] `GET /api/categories` trả **9 mặc định + danh mục riêng của user**, không thấy danh mục riêng của user khác
-- [ ] Tạo giao dịch với `category_id` vừa tạo → **lưu thành công**, số dư ví cập nhật đúng
-- [ ] Tạo giao dịch với `category_id` không tồn tại → **HTTP 400** "Danh mục không tồn tại…" (không phải 500)
-- [ ] 9 danh mục mặc định vẫn hiển thị cho mọi user
-- [ ] Cache danh mục tách theo user (không rò giữa các user); POST invalidate đúng
-- [ ] Có test bao phủ: tạo category → tạo transaction với category đó → liệt kê thấy giao dịch
-- [ ] Không clippy warning mới; không đổi format field `CategoryItem` đang có
+- [x] `POST /api/categories` (có token) tạo được danh mục, trả 201 + `CategoryItem` có `id`
+- [x] `GET /api/categories` trả **9 mặc định + danh mục riêng của user**, không thấy danh mục riêng của user khác
+- [x] Tạo giao dịch với `category_id` vừa tạo → **lưu thành công**, số dư ví cập nhật đúng
+- [x] Tạo giao dịch với `category_id` không tồn tại → **HTTP 400** "Danh mục không tồn tại…" (không phải 500)
+- [x] 9 danh mục mặc định vẫn hiển thị cho mọi user
+- [x] Cache danh mục tách theo user (không rò giữa các user); POST invalidate đúng
+- [x] Có test bao phủ: tạo category → tạo transaction với category đó → liệt kê thấy giao dịch
+- [x] Không clippy warning mới; không đổi format field `CategoryItem` đang có
 
 ## 5. Cổng kiểm chứng (bắt buộc chạy, phải xanh)
 ```bash
@@ -97,6 +97,6 @@ cargo build && cargo clippy -- -D warnings && cargo test && graphify update .
 
 ## 6. Bàn giao
 - **Branch:** `feat/user-categories`
-- **Commit/PR:** <điền khi xong>
-- **Ghi chú của implementer:** <điền — nhớ nêu rõ nếu đã đổi GET /api/categories sang yêu cầu auth (ảnh hưởng client)>
+- **Commit/PR:** ccf7c9c
+- **Ghi chú của implementer:** **Đổi contract:** `GET /api/categories` hiện yêu cầu `AuthenticatedUser` (client phải gửi header `Authorization: Bearer <token>`). Đã thêm cột `user_id` + index + FK (`ON DELETE CASCADE`) vào `findora.categories`, tách cache key thành `findora:cache:categories:{user_id}:{lang}`, thêm `POST /api/categories` kèm cache invalidation, map mã PostgreSQL `23503` sang `400 Bad Request`, xác thực `category_id` global hoặc thuộc user trong `create_transaction_handler`, và bổ sung `tests/category_tests.rs`. Cổng kiểm chứng đã chạy và xanh toàn bộ.
 - **Nhận xét review của Claude:** <để trống>

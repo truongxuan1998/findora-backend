@@ -107,7 +107,7 @@ pub async fn run_schema_and_migrations(pool: &PgPool) -> Result<(), sqlx::Error>
     .execute(pool)
     .await?;
 
-    // 4. Bảng Categories (Hỗ trợ Song ngữ: name - Tiếng Việt, name_en - Tiếng Anh)
+    // 4. Bảng Categories (Hỗ trợ Song ngữ: name - Tiếng Việt, name_en - Tiếng Anh, user_id NULL = mặc định global)
     sqlx::raw_sql(
         "CREATE TABLE IF NOT EXISTS findora.categories (
             id TEXT PRIMARY KEY,
@@ -116,9 +116,24 @@ pub async fn run_schema_and_migrations(pool: &PgPool) -> Result<(), sqlx::Error>
             icon TEXT NOT NULL,
             color TEXT NOT NULL,
             type TEXT NOT NULL CHECK (type IN ('EXPENSE', 'INCOME')),
+            user_id TEXT,
             created_at TIMESTAMPTZ DEFAULT NOW()
         );
-        ALTER TABLE findora.categories ADD COLUMN IF NOT EXISTS name_en TEXT;",
+        ALTER TABLE findora.categories ADD COLUMN IF NOT EXISTS name_en TEXT;
+        ALTER TABLE findora.categories ADD COLUMN IF NOT EXISTS user_id TEXT;
+        CREATE INDEX IF NOT EXISTS idx_categories_user ON findora.categories(user_id);
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'categories_user_id_fkey'
+                  AND conrelid = 'findora.categories'::regclass
+            ) THEN
+                ALTER TABLE findora.categories
+                    ADD CONSTRAINT categories_user_id_fkey
+                    FOREIGN KEY (user_id) REFERENCES findora.users(id) ON DELETE CASCADE;
+            END IF;
+        END $$;",
     )
     .execute(pool)
     .await?;

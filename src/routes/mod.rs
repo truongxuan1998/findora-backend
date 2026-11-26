@@ -30,7 +30,10 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/users/profile", get(users::get_profile_handler).put(users::update_profile_handler))
         .route("/api/users/avatar", post(users::upload_avatar_handler))
         // Categories
-        .route("/api/categories", get(categories::categories_handler))
+        .route(
+            "/api/categories",
+            get(categories::categories_handler).post(categories::create_category_handler),
+        )
         // Wallets
         .route("/api/wallets", get(wallets::list_wallets_handler).post(wallets::create_wallet_handler))
         // Transactions

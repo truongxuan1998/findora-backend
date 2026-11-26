@@ -27,6 +27,10 @@ impl From<sqlx::Error> for AppError {
             if db_err.code().as_deref() == Some("23505") {
                 return AppError::Conflict("Dữ liệu đã tồn tại trong hệ thống (Duplicate record)".into());
             }
+            // PostgreSQL Foreign Key Violation Code is 23503
+            if db_err.code().as_deref() == Some("23503") {
+                return AppError::BadRequest("Danh mục không tồn tại hoặc không hợp lệ".into());
+            }
         }
         AppError::Database(err)
     }
