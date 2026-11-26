@@ -1,4 +1,7 @@
-use crate::auth::{create_jwt, AuthenticatedUser};
+use crate::auth::{
+    create_versioned_jwt, fetch_token_version, revoked_token_error, AuthenticatedUser,
+    TOKEN_VALID_DAYS,
+};
 use crate::errors::{AppError, AppResult};
 use crate::i18n::{self, Language};
 use crate::models::user::{
@@ -129,8 +132,8 @@ pub async fn register_handler(
 
     info!(user_id = %user_id, email = %email, lang = %lang.code(), "🎉 Đăng ký tài khoản và khởi tạo ví thành công");
 
-    // Tạo token JWT có thời hạn 30 ngày
-    let token = create_jwt(&user_id, &email, &state.config.jwt_secret, 30)?;
+    // Tạo token JWT có thời hạn 30 ngày (user mới luôn có token_version = 0)
+    let token = create_versioned_jwt(&user_id, &email, 0, &state.config.jwt_secret, TOKEN_VALID_DAYS)?;
 
     Ok((
         StatusCode::CREATED,
@@ -161,8 +164,8 @@ pub async fn login_handler(
 
     let user_row = sqlx::query(
         "SELECT id, email, full_name, phone_number, password_hash, avatar_url,
-                failed_login_attempts, locked_until, last_failed_at
-         FROM findora.users 
+                failed_login_attempts, locked_until, last_failed_at, token_version
+         FROM findora.users
          WHERE email = $1"
     )
     .bind(&email)
@@ -297,7 +300,8 @@ pub async fn login_handler(
 
     info!(user_id = %user_id, email = %email, lang = %lang.code(), "🔐 Đăng nhập thành công, đã reset rate limit attempts");
 
-    let token = create_jwt(&user_id, &email, &state.config.jwt_secret, 30)?;
+    let token_version: i32 = row.get("token_version");
+    let token = create_versioned_jwt(&user_id, &email, token_version, &state.config.jwt_secret, TOKEN_VALID_DAYS)?;
 
     Ok(Json(AuthResponse {
         success: true,
@@ -349,6 +353,62 @@ pub async fn logout_handler(
         "success": true,
         "message": i18n::msg_logout_success(lang)
     })))
+}
+
+/// Đăng xuất mọi thiết bị (POST /api/auth/logout-all): tăng `token_version`
+/// nên mọi JWT đã cấp (kể cả bản sao Face ID trên các máy khác) đều bị từ chối.
+pub async fn logout_all_handler(
+    State(state): State<Arc<AppState>>,
+    lang: Language,
+    auth: AuthenticatedUser,
+) -> AppResult<Json<serde_json::Value>> {
+    let updated = sqlx::query(
+        "UPDATE findora.users
+         SET token_version = token_version + 1, updated_at = NOW()
+         WHERE id = $1",
+    )
+    .bind(&auth.user_id)
+    .execute(&*state.pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    if updated.rows_affected() == 0 {
+        return Err(revoked_token_error());
+    }
+
+    info!(user_id = %auth.user_id, email = %auth.email, "🚪 [LOGOUT ALL] Đã thu hồi toàn bộ phiên đăng nhập của người dùng");
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "message": i18n::msg_logout_all_success(lang)
+    })))
+}
+
+/// Gia hạn phiên (POST /api/auth/refresh): đổi token còn hiệu lực (chưa hết hạn, chưa bị thu hồi)
+/// lấy token mới hạn 30 ngày. Client gọi khi mở app / mở khóa bằng Face ID.
+pub async fn refresh_token_handler(
+    State(state): State<Arc<AppState>>,
+    lang: Language,
+    auth: AuthenticatedUser,
+) -> AppResult<Json<AuthResponse>> {
+    let token_version = fetch_token_version(&state.pool, &auth.user_id)
+        .await?
+        .ok_or_else(revoked_token_error)?;
+
+    let token = create_versioned_jwt(
+        &auth.user_id,
+        &auth.email,
+        token_version,
+        &state.config.jwt_secret,
+        TOKEN_VALID_DAYS,
+    )?;
+
+    Ok(Json(AuthResponse {
+        success: true,
+        message: i18n::msg_token_refreshed(lang).to_string(),
+        token: Some(token),
+        user: None,
+    }))
 }
 
 /// 4. Yêu cầu mã xác nhận Quên mật khẩu (POST /api/auth/forgot-password)
@@ -539,15 +599,17 @@ pub async fn reset_password_handler(
     let mut tx = state.pool.begin().await.map_err(AppError::Database)?;
 
     // 4. Cập nhật mật khẩu mới & Mở khóa tài khoản (reset rate limit attempts)
+    //    Tăng token_version để thu hồi mọi phiên cũ (kể cả token Face ID trên thiết bị khác)
     let user_row = sqlx::query(
-        "UPDATE findora.users 
-         SET password_hash = $1, 
-             failed_login_attempts = 0, 
-             locked_until = NULL, 
-             last_failed_at = NULL, 
-             updated_at = NOW() 
-         WHERE email = $2 
-         RETURNING id, full_name, phone_number, avatar_url"
+        "UPDATE findora.users
+         SET password_hash = $1,
+             failed_login_attempts = 0,
+             locked_until = NULL,
+             last_failed_at = NULL,
+             token_version = token_version + 1,
+             updated_at = NOW()
+         WHERE email = $2
+         RETURNING id, full_name, phone_number, avatar_url, token_version"
     )
     .bind(&hashed_pw)
     .bind(&email)
@@ -577,8 +639,9 @@ pub async fn reset_password_handler(
 
     let avatar_url: Option<String> = user.get("avatar_url");
 
-    // Cấp ngay JWT token để người dùng đăng nhập ngay lập tức
-    let token = create_jwt(&user_id, &email, &state.config.jwt_secret, 30)?;
+    // Cấp ngay JWT token (version mới) để người dùng đăng nhập ngay lập tức
+    let token_version: i32 = user.get("token_version");
+    let token = create_versioned_jwt(&user_id, &email, token_version, &state.config.jwt_secret, TOKEN_VALID_DAYS)?;
 
     info!(user_id = %user_id, email = %email, "🎉 Đặt lại mật khẩu thành công và tự động mở khóa tài khoản");
 
