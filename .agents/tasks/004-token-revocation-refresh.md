@@ -3,7 +3,7 @@
 - **Người tạo (architect):** Claude
 - **Người thực hiện (implementer):** Claude (theo yêu cầu trực tiếp của người dùng)
 - **Độ ưu tiên:** Cao
-- **Trạng thái:** REVIEW
+- **Trạng thái:** DONE
 
 ## 1. Mục tiêu / Lý do (Why)
 JWT không trạng thái, hạn 30 ngày, và backend không có cách thu hồi:
@@ -57,4 +57,4 @@ cargo build && cargo clippy -- -D warnings && cargo test && graphify update .
   - `tests/token_revocation_tests.rs` kiểm thử trên DB thật: logout-all thu hồi token cũ, refresh cấp version mới,
     user bị xoá → token bị từ chối.
   - Thứ tự deploy: backend trước, app sau (app mới tự bỏ qua khi backend cũ trả 404 cho `/refresh`).
-- **Nhận xét review của Claude:**
+- **Nhận xét review của Claude:** PASS — đã merge vào `main` (`38c3c6d`). Kiểm: claim `ver` `#[serde(default)]` → token cũ = v0 khớp DB default 0 (không đăng xuất hàng loạt khi deploy); register=v0, login đọc version từ DB, reset_password tăng version trong UPDATE + cấp token version mới (RETURNING), logout-all tăng version (user bị xoá→401), refresh đọc version hiện tại từ DB cấp token mới; extractor từ chối token lệch version/user đã xoá. Migration self-healing (ADD COLUMN IF NOT EXISTS token_version DEFAULT 0). Test `token_revocation_tests` + 2 unit test backward-compat bao phủ đủ; full suite 17/17, clippy --all-targets sạch. **Theo dõi (không chặn):** extractor thêm 1 SELECT token_version mỗi request authed (trước đây 0 DB hit) — nên cache Redis TTL ngắn nếu lên tải cao (đã ghi nhận, hoãn). **Deploy:** backend trước, app sau.
